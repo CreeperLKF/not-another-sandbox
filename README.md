@@ -45,11 +45,11 @@ Human: [closes session when done]
 
 ## 三种模式
 
-| 模式 | 适用场景 | 特点 |
-|------|---------|------|
-| **direct** | 单 agent，完全信任 | 最简单，零开销，无令牌 |
-| **relay** | 多 agent，需要隔离 | Daemon 管理，令牌认证 |
-| **sodo** | 多 agent，无 daemon | sudoers 验证，令牌认证 |
+| 模式 | 适用场景 | 依赖 | 特点 |
+|------|---------|------|------|
+| **direct** | 单 agent，完全信任 | bash + tmux | 最简单，零编译，无令牌 |
+| **relay** | 多 agent，需要隔离 | Go 或预编译二进制 | Daemon 管理，令牌认证，强隔离 |
+| **sodo** | 多 agent，无 daemon | bash + tmux + sudo | Shell 脚本，令牌认证，零编译 |
 
 ## 文档
 

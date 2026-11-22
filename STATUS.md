@@ -124,6 +124,8 @@ No test coverage yet. Needs:
 - **No single revoke command**: Closing tmux = revoking access. Keeps it simple.
 - **Skills not self-modifying**: Setup edits skill files, but skills themselves are read-only at runtime.
 - **WSL hardening optional**: User can skip if single-agent trusted environment.
+- **Dependency minimization**: 90% of users (direct/sodo) need zero compilation. Only relay mode requires Go.
+- **Token generation**: System resources (uuidgen, /proc/sys/kernel/random/uuid) for sodo/direct, crypto/rand for relay.
 
 ### Known Issues
 - [ ] `relay/go.mod` needs `go mod tidy` before building
