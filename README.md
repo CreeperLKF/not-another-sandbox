@@ -10,6 +10,8 @@
 [![Zero Compile](https://img.shields.io/badge/Build-Zero%20Compile-brightgreen.svg)](#快速开始默认direct-模式)
 [![Dependencies](https://img.shields.io/badge/Deps-bash%20%2B%20tmux-orange.svg)](#模式对比)
 
+**简体中文** | [English](README.en.md)
+
 </div>
 
 ---
@@ -212,7 +214,8 @@ printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
 
 ```text
 not-another-sandbox/
-├── README.md                        # 你正在看的文档
+├── README.md                        # 你正在看的文档（中文）
+├── README.en.md                     # 英文版 README
 ├── install.sh                       # 交互 / 非交互安装脚本（默认 direct）
 ├── uninstall.sh                     # 干净卸载脚本
 ├── scripts/
@@ -221,7 +224,8 @@ not-another-sandbox/
 │   ├── nas-setup-guide/SKILL.md     # 安装引导 Skill（供人类侧 Agent 读取）
 │   └── nas-elevate/SKILL.md         # 运行时提权 Skill（安装到 Agent 账户）
 └── docs/
-    └── design.md                    # 完整架构设计与安全不变量
+    ├── design.md                    # 完整架构设计与安全不变量（中文）
+    └── design.en.md                 # 完整架构设计与安全不变量（英文）
 ```
 
 ## 延伸阅读

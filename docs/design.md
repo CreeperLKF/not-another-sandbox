@@ -1,5 +1,7 @@
 # not-another-sandbox (NAS) / nmux — 设计文档
 
+**简体中文** | [English](design.en.md)
+
 > **不是又一个试图困死 Agent 的静态沙箱，而是一套面向终端协作的“有人值守权限委托（Attended Privilege Delegation）”机制。**
 
 ---
@@ -152,7 +154,8 @@ Human 结束监督:
 
 ```
 not-another-sandbox/
-├── README.md                        # 快速开始（默认 direct，高级 sodo）
+├── README.md                        # 快速开始（中文）
+├── README.en.md                     # 快速开始（英文）
 ├── install.sh                       # 交互/非交互安装脚本
 ├── uninstall.sh                     # 清理 sudoers、nmux、配置与 skill
 ├── scripts/
@@ -161,5 +164,6 @@ not-another-sandbox/
 │   ├── nas-setup-guide/SKILL.md     # 安装引导 Skill（README 引用，不安装）
 │   └── nas-elevate/SKILL.md         # 运行时提权 Skill（安装时按模式渲染）
 └── docs/
-    └── design.md                    # 本文档
+    ├── design.md                    # 本文档（中文）
+    └── design.en.md                 # 设计文档（英文）
 ```
