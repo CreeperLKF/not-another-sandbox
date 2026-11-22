@@ -1,111 +1,30 @@
 ---
 name: nas-elevate
-description: Request privilege elevation through supervised tmux sessions. Use when you need elevated permissions (installing packages, modifying system config, accessing protected files) that your agent account lacks. Also when the user mentions sudo, root access, or system administration.
+description: Request temporary supervised privilege elevation via tmux/nmux (not-another-sandbox). Use when a task requires privileges your agent account lacks (installing packages, editing system configs, accessing human-owned files, or running sudo).
 ---
 
-# Supervised Privilege Elevation
+# Supervised Privilege Elevation (`nas-elevate`)
 
-Request temporary elevated privileges under human supervision via the not-another-sandbox (NAS) system.
+You run in a low-privilege agent account. When you need human or root privileges, do not attempt workarounds—ask the human to open a supervised tmux session so they can watch every command in real-time and revoke access instantly by closing the session.
 
-## What This Is
+**Core principles:**
+- State clearly **why** you need elevation and **what commands** you plan to run.
+- Everything happens inside a visible tmux pane watched by the human.
+- Closing tmux immediately revokes your access.
 
-You run in a low-privilege agent account. When you need higher permissions, you ask the human to open a supervised session. The human watches every command in real-time and can terminate access instantly by closing the session.
-
-**Key principles:**
-- Explain why you need elevation and what you'll do
-- The human sees everything you send
-- Session closes = access revoked
-
-## What This Is
-
-You run in a low-privilege agent account. When you need higher permissions, you ask the human to open a supervised session. The human watches every command in real-time and can terminate access instantly by closing the session.
-
-**Key principles:**
-- Explain why you need elevation and what you'll do
-- The human sees everything you send
-- Session closes = access revoked
-
-## Installation Mode
+## Active Configuration
 
 <!-- MODE_MARKER_START -->
 **Current mode: UNINITIALIZED**
+
+Check `~/.config/nas/mode` (`direct` or `sodo`) and `~/.config/nas/config`.
 <!-- MODE_MARKER_END -->
 
-Check the mode if needed:
-```bash
-cat ~/.config/nas/mode 2>/dev/null || echo "direct"
-```
+## Workflow
 
-## Request Pattern
-
-**1. Explain your need:**
-```
-I need elevated privileges to install build-essential and configure ufw:
-  apt update && apt install -y build-essential
-  ufw allow 8080/tcp && ufw enable
-Could you create a session for me?
-```
-
-**2. Wait for token** (if relay/sodo) or confirmation (if direct)
-
-**3. Use the session:**
-
-### Direct mode
-```bash
-tmux send-keys -t work "apt update" Enter
-tmux capture-pane -t work -p
-```
-
-### Relay/sodo mode
-```bash
-echo "$TOKEN" | nmux send-keys -t work "apt update" Enter
-echo "$TOKEN" | nmux capture-pane -t work -p
-```
-
-**4. Confirm completion:**
-```
-Done with the installation. You can close the session now.
-```
-
-That's it. Explain need, get access, work, confirm done.
-# Send a command
-tmux send-keys -t work "apt update" Enter
-
-# Read the output
-tmux capture-pane -t work -p
-```
-
-### For Token-Based Mode (relay/sodo)
-
-## Request Pattern
-
-**1. Explain your need:**
-```
-I need elevated privileges to install build-essential and configure ufw:
-  apt update && apt install -y build-essential
-  ufw allow 8080/tcp && ufw enable
-Could you create a session for me?
-```
-
-**2. Wait for token** (if relay/sodo) or confirmation (if direct)
-
-**3. Use the session:**
-
-### Direct mode
-```bash
-tmux send-keys -t work "apt update" Enter
-tmux capture-pane -t work -p
-```
-
-### Relay/sodo mode
-```bash
-echo "$TOKEN" | nmux send-keys -t work "apt update" Enter
-echo "$TOKEN" | nmux capture-pane -t work -p
-```
-
-**4. Confirm completion:**
-```
-Done with the installation. You can close the session now.
-```
-
-That's it. Explain need, get access, work, confirm done.
+1. **Explain and request**: Briefly state the goal and planned commands, then give the human the exact command to create the session (per active mode above).
+2. **Wait for confirmation** (and the session token in `sodo` mode).
+3. **Act & observe**: Send commands and read screen output with `send-keys` / `capture-pane`.
+   - In `sodo` mode, **always pass the token via stdin** (`printf '%s\n' "$TOKEN" | nmux <session> ...`). Never put the token in command-line arguments or shared files.
+   - `nmux <session> <tmux-subcommand> ...` forwards standard tmux subcommands directly to that isolated session (global flags like `-L`/`-S`/`-f` are blocked by design).
+4. **Confirm done**: Once finished, tell the human they can close the tmux session (`exit` or `kill-session` / `nmux kill <session>`).

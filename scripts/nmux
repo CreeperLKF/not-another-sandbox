@@ -1,0 +1,267 @@
+#!/bin/bash -p
+# nmux - Single-file privilege delegation wrapper for not-another-sandbox (sodo mode)
+#
+# Architecture:
+#   - Owned by root:root (0755), config at /etc/nas/sodo.conf (root:root, 0644)
+#   - Human runs `nmux create <session>` -> starts isolated tmux server (-L nmux-<session>)
+#     and stores token in tmux server RAM (@nmux_token). Closing tmux destroys token automatically.
+#   - Agent runs `printf '%s\n' "$TOKEN" | nmux <session> <tmux-subcommand> [args...]`
+#     -> re-execs via `sudo -n -u <human> /usr/local/bin/nmux ...` (stdin preserved, zero argv token)
+#     -> verifies token against tmux RAM, blocks global flags (-L/-S/-f), forwards to tmux.
+
+set -euo pipefail
+export PATH="/usr/local/bin:/usr/bin:/bin"
+unset TMUX TMUX_TMPDIR
+umask 077
+
+CONF_FILE="/etc/nas/sodo.conf"
+SELF_PATH="/usr/local/bin/nmux"
+
+die() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+validate_username() {
+  local u="${1:-}"
+  [[ "$u" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid username '$u' in $CONF_FILE"
+}
+
+validate_session() {
+  local s="${1:-}"
+  [[ "$s" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$ ]] || \
+    die "invalid session name '$s' (allowed: alphanumeric, '_', '-', cannot start with '-')"
+}
+
+validate_subcommand() {
+  local cmd="${1:-}"
+  [[ "$cmd" =~ ^[a-z][a-z0-9-]*$ ]] || \
+    die "invalid tmux subcommand '$cmd' (global tmux flags like -L/-S/-f are not allowed)"
+}
+
+load_config() {
+  if [ ! -f "$CONF_FILE" ] || [ -L "$CONF_FILE" ]; then
+    die "config file $CONF_FILE is missing or is a symlink"
+  fi
+
+  local owner perms
+  owner="$(stat -c %u "$CONF_FILE" 2>/dev/null || stat -f %u "$CONF_FILE" 2>/dev/null || echo -1)"
+  perms="$(stat -c %a "$CONF_FILE" 2>/dev/null || stat -f %Lp "$CONF_FILE" 2>/dev/null || echo 777)"
+  [ "$owner" = "0" ] || die "$CONF_FILE must be owned by root"
+  case "$perms" in
+    *[2367]?|*[2367]) die "$CONF_FILE must not be group/world writable (mode $perms)" ;;
+  esac
+
+  HUMAN_USER=""
+  AGENT_USER=""
+  while IFS='=' read -r key val; do
+    case "$key" in
+      HUMAN_USER) HUMAN_USER="$val" ;;
+      AGENT_USER) AGENT_USER="$val" ;;
+    esac
+  done < "$CONF_FILE"
+
+  [ -n "$HUMAN_USER" ] || die "HUMAN_USER not set in $CONF_FILE"
+  [ -n "$AGENT_USER" ] || die "AGENT_USER not set in $CONF_FILE"
+  validate_username "$HUMAN_USER"
+  validate_username "$AGENT_USER"
+}
+
+generate_token() {
+  if [ -r /proc/sys/kernel/random/uuid ]; then
+    cat /proc/sys/kernel/random/uuid
+  elif command -v uuidgen >/dev/null 2>&1; then
+    uuidgen
+  else
+    od -An -tx1 -N16 /dev/urandom | tr -d ' \n'
+    echo ""
+  fi
+}
+
+print_human_usage() {
+  cat <<'EOF'
+Usage (human):
+  nmux create [-d] <session>             Create isolated tmux session with in-memory token
+  nmux attach <session>                  Attach to session to supervise in real-time
+  nmux token <session>                   Show session token again
+  nmux ls                                List active nmux sessions
+  nmux kill <session>                    Terminate session and destroy its token
+  nmux <session> <tmux-subcommand> ...   Run a tmux command directly on that session
+EOF
+}
+
+print_agent_usage() {
+  cat <<'EOF' >&2
+Usage (agent):
+  printf '%s\n' "$TOKEN" | nmux <session> <tmux-subcommand> [args...]
+
+Examples:
+  printf '%s\n' "$TOKEN" | nmux work send-keys -t work "apt update" Enter
+  printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
+EOF
+}
+
+human_create() {
+  local detach=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -d|--detach) detach=1; shift ;;
+      --) shift; break ;;
+      -*) die "unknown option '$1'" ;;
+      *) break ;;
+    esac
+  done
+
+  local session="${1:-}"
+  if [ -z "$session" ] || [ $# -gt 1 ]; then
+    die "usage: nmux create [-d] <session>"
+  fi
+  validate_session "$session"
+
+  local socket="nmux-$session"
+  if tmux -L "$socket" has-session -t "$session" 2>/dev/null; then
+    die "session '$session' already exists"
+  fi
+
+  local token
+  token="$(generate_token)"
+  tmux -L "$socket" new-session -d -s "$session"
+  tmux -L "$socket" set-option -g @nmux_token "$token"
+
+  echo "Session: $session"
+  echo "Token:   $token"
+
+  if [ "$detach" -eq 0 ] && [ -t 0 ] && [ -t 1 ]; then
+    echo ""
+    echo "Copy the token to your agent, then press Enter to attach and supervise (Ctrl-C to stay detached)..."
+    read -r _
+    exec tmux -L "$socket" attach-session -t "$session"
+  fi
+}
+
+human_ls() {
+  local sock_dir="/tmp/tmux-$(id -u)"
+  local found=0
+  if [ -d "$sock_dir" ]; then
+    shopt -s nullglob
+    for sock in "$sock_dir"/nmux-*; do
+      [ -S "$sock" ] || continue
+      local base="${sock##*/}"
+      if tmux -L "$base" list-sessions 2>/dev/null; then
+        found=1
+      else
+        # Clean up stale socket left behind after tmux server exited
+        rm -f "$sock" 2>/dev/null || true
+      fi
+    done
+    shopt -u nullglob
+  fi
+  if [ "$found" -eq 0 ]; then
+    echo "No active nmux sessions."
+  fi
+}
+
+human_dispatch() {
+  local cmd="${1:-help}"
+  case "$cmd" in
+    create|new)
+      shift
+      human_create "$@"
+      ;;
+    attach|a)
+      [ $# -eq 2 ] || die "usage: nmux attach <session>"
+      validate_session "$2"
+      exec tmux -L "nmux-$2" attach-session -t "$2"
+      ;;
+    token)
+      [ $# -eq 2 ] || die "usage: nmux token <session>"
+      validate_session "$2"
+      local tok
+      tok="$(tmux -L "nmux-$2" show-option -gqv @nmux_token 2>/dev/null || true)"
+      [ -n "$tok" ] || die "session '$2' not found"
+      echo "$tok"
+      ;;
+    kill)
+      [ $# -eq 2 ] || die "usage: nmux kill <session>"
+      validate_session "$2"
+      tmux -L "nmux-$2" kill-server 2>/dev/null || true
+      rm -f "/tmp/tmux-$(id -u)/nmux-$2" 2>/dev/null || true
+      echo "Session '$2' terminated and token destroyed."
+      ;;
+    ls|list)
+      human_ls
+      ;;
+    -h|--help|help)
+      print_human_usage
+      ;;
+    *)
+      if [ $# -ge 2 ]; then
+        validate_session "$1"
+        local session="$1"
+        shift
+        validate_subcommand "$1"
+        exec tmux -L "nmux-$session" "$@"
+      fi
+      print_human_usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+agent_verify_and_forward() {
+  [ "$CURRENT_USER" = "$HUMAN_USER" ] || \
+    die "elevated nmux must run as '$HUMAN_USER' (got '$CURRENT_USER')"
+  if [ "$CALLER_SUDO_USER" != "$AGENT_USER" ] && [ "$CALLER_SUDO_USER" != "root" ]; then
+    die "unauthorized caller '$CALLER_SUDO_USER'"
+  fi
+
+  if [ $# -lt 2 ]; then
+    print_agent_usage
+    exit 1
+  fi
+
+  local session="$1"
+  shift
+  local subcmd="$1"
+  validate_session "$session"
+  validate_subcommand "$subcmd"
+
+  if [ -t 0 ]; then
+    die "token must be passed via stdin (never via command-line arguments)"
+  fi
+
+  local provided_token=""
+  IFS= read -r provided_token || true
+  [ -n "$provided_token" ] || die "empty token on stdin"
+
+  local socket="nmux-$session"
+  local stored_token=""
+  stored_token="$(tmux -L "$socket" show-option -gqv @nmux_token 2>/dev/null || true)"
+  [ -n "$stored_token" ] || die "session '$session' not found or expired"
+
+  if [ "$provided_token" != "$stored_token" ]; then
+    die "invalid token"
+  fi
+
+  exec tmux -L "$socket" "$@"
+}
+
+# --- Main ---
+load_config
+CURRENT_USER="$(id -un)"
+CALLER_SUDO_USER="${SUDO_USER:-}"
+
+if [ -n "$CALLER_SUDO_USER" ]; then
+  # Always treat sudo-invoked execution as untrusted agent verification path
+  agent_verify_and_forward "$@"
+elif [ "$CURRENT_USER" = "$AGENT_USER" ]; then
+  if [ $# -lt 2 ]; then
+    print_agent_usage
+    exit 1
+  fi
+  exec sudo -n -u "$HUMAN_USER" "$SELF_PATH" "$@"
+elif [ "$CURRENT_USER" = "$HUMAN_USER" ]; then
+  human_dispatch "$@"
+else
+  die "nmux is configured for human='$HUMAN_USER' and agent='$AGENT_USER' (current user: '$CURRENT_USER')"
+fi

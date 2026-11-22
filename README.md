@@ -1,115 +1,114 @@
-# not-another-sandbox
+# not-another-sandbox (NAS)
 
-> **不是又一个沙箱，而是面向终端协作的有人值守权限委托机制**
+> **不是又一个试图困死 Agent 的静态沙箱，而是面向终端协作的“有人值守权限委托”机制。**
 
-一套让 AI Agent 在人类监督下临时获得提权的系统——不是困住 Agent，而是让人类全程可见、随时可停。
+让 AI Agent 平时运行在低权限操作系统账户下；需要提权时，由人类现场开启受控终端会话，全程可见、随时关闭即撤权。
 
-## 核心理念
+## 核心准则
 
-- **授权之前**：和操作系统一样的安全（Agent 在低权限账户运行）
-- **授权之后**：和用户一样的权力（完整会话访问，无命令白名单）
-- **简单到眼睛**：清晰的设计，易于理解和审计
+0. **简单到眼睛**：零编译依赖，纯原生工具与短小可逐行审计的脚本
+1. **授权之前，和操作系统一样安全**：平时依托 OS 原生用户隔离，默认无权
+2. **授权之后，和用户一样的权力**：不做脆弱的命令白名单，风险兜底交给人类实时观测与随时撤权
 
-## 快速开始
+---
 
-### 安装
+## 快速开始（默认：`direct` 模式）
+
+**`direct` 是默认安装模式**——零额外二进制、零后台进程、零 sudoers 修改，只需 `bash` + `tmux` + `/nas-elevate` Skill。
+
+### 1. 安装
 
 ```bash
-# 下载并运行安装脚本
 git clone https://github.com/CreeperLKF/not-another-sandbox.git
 cd not-another-sandbox
 ./install.sh
 ```
 
-安装脚本将引导你：
-1. 选择模式（direct/relay/sodo）
-2. 配置 agent 账户
-3. 检测 WSL 漏洞（如适用）
-4. 完成安装
+`install.sh` 默认选择 `direct` 模式，完成以下配置：
+- 创建（或指定）低权限 Agent 账户（默认 `nas-agent`）
+- 检测 WSL 互操作提权风险（如适用）
+- 安装并渲染运行时技能 `/nas-elevate` 到 Agent 账户
 
-**依赖**：
-- Direct 模式：仅需 bash + tmux
-- Sodo 模式：bash + tmux + sudo
-- Relay 模式：需要 Go（或下载预编译二进制）
+> 也可以直接把 [skills/nas-setup-guide/SKILL.md](skills/nas-setup-guide/SKILL.md) 交给运行在人类账户的 Agent，由它一步步引导你完成安装。
 
-### 使用
+### 2. 日常使用（`direct` 模式）
 
-Agent 需要提权时，调用 `/nas-elevate` skill：
-
-```
-Agent: I need to install nginx. May I request elevated access?
-Human: Sure. [creates session following agent's instructions]
-Agent: [sends commands, human watches in real-time]
-Human: [closes session when done]
-```
-
-## 三种模式
-
-| 模式 | 适用场景 | 依赖 | 特点 |
-|------|---------|------|------|
-| **direct** | 单 agent，完全信任 | bash + tmux | 最简单，零编译，无令牌 |
-| **relay** | 多 agent，需要隔离 | Go 或预编译二进制 | Daemon 管理，令牌认证，强隔离 |
-| **sodo** | 多 agent，无 daemon | bash + tmux + sudo | Shell 脚本，令牌认证，零编译 |
-
-## 文档
-
-- [设计文档](docs/design.md) - 完整的架构与原理
-- [Skills](skills/) - Agent 使用的技能
-  - `nas-setup-guide` - 安装指导（README 引用，不安装）
-  - `nas-elevate` - 运行时提权（安装后可用）
-
-## 工作流程示例
-
-### Direct 模式
+当 Agent 需要高权限时，触发 `/nas-elevate`：
 
 ```bash
-# Human creates session
+# 1. 人类在 agent 账户中创建 tmux，并在会话内提权到 human（或 root）
 tmux new -s work
-su - human
+su - <human>
 
-# Agent sends commands
+# 2. Agent 通过原生 tmux 注入指令并读取屏幕，人类全程实时观看
 tmux send-keys -t work "apt update" Enter
 tmux capture-pane -t work -p
 
-# Human closes session
-tmux kill-session -t work
+# 3. 完成后人类关闭会话，权限即时收回
+exit  # 或 tmux kill-session -t work
 ```
 
-### Relay/Sodo 模式
+`direct` 模式适用于**单 Agent 或同机多 Agent 互信**场景（任何同 UID 进程均可访问该 tmux socket）。
+
+---
+
+## 高级模式：多 Agent 令牌隔离（`sodo` 模式）
+
+如果你在同一 Agent 账户下运行**多个互不信任的 Agent**，希望只有持有本次会话临时令牌的 Agent 才能操作提权窗口，可启用高级模式 `sodo`：
+
+### 安装 `sodo` 模式
 
 ```bash
-# Human creates session with token
-nmux create work
-# Token: abc-123-def
-
-# Agent attaches
-echo "abc-123-def" | nmux attach work --token -
-
-# Agent sends commands
-nmux send work "apt update"
-nmux read work
-
-# Human closes
-tmux kill-session -t work
+./install.sh --mode sodo
 ```
 
-## 安全特性
+仅依赖 `bash` + `tmux` + `sudo`（**零编译**），安装内容仅包含：
+- `/usr/local/bin/nmux`：单文件纯 Shell 脚本（`root:root`，`0755`）
+- `/etc/nas/sodo.conf`：受信任账户配置（`root:root`，`0644`）
+- `/etc/sudoers.d/nas-sodo`：仅允许 Agent 免密以 Human 身份调用 `/usr/local/bin/nmux`
 
-✓ **默认无权**：Agent 在低权限账户运行  
-✓ **显式授权**：人类主动创建会话才能提权  
-✓ **实时监控**：人类看到每条命令，随时可中断  
-✓ **即时销毁**：关闭 tmux = 权限失效，无残留  
-✓ **令牌隔离**（relay/sodo）：多 agent 互不干扰  
-✓ **WSL 加固**（可选）：修补已知提权绕过
+### 使用 `sodo` 模式
 
-## 贡献
+```bash
+# 1. 人类在 human 账户创建隔离会话（令牌仅存于该独立 tmux server 内存中）
+nmux create work
+# 输出 Session: work / Token: <uuid>，复制给指定 Agent 后按 Enter 进入终端盯屏
 
-欢迎提交 Issue 和 Pull Request。
+# 2. Agent 每次调用通过 stdin 传递令牌（绝不经由命令行参数，防止 ps/cmdline 泄漏）
+printf '%s\n' "$TOKEN" | nmux work send-keys -t work "apt update" Enter
+printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
+
+# 3. 人类关闭 tmux 会话（exit 或 nmux kill work）
+# 独立 tmux server 随之退出，内存令牌自动销毁，零文件残留
+```
+
+### 卸载
+
+```bash
+./uninstall.sh
+```
+
+自动清理 `/etc/sudoers.d/nas-sodo`、`/usr/local/bin/nmux`、`/etc/nas/`、Agent 配置与 Skill（不会自动删除 Agent 用户账户，如需删除请手动 `sudo userdel -r <agent>`）。
+
+---
+
+## 模式对比
+
+| 维度 | `direct`（默认） | `sodo`（高级） |
+|---|---|---|
+| **适用场景** | 单 Agent / 互信多 Agent | 同 UID 下多 Agent 隔离 |
+| **依赖** | `bash` + `tmux` | `bash` + `tmux` + `sudo` |
+| **额外组件** | 无 | 单文件 `/usr/local/bin/nmux` |
+| **系统侵入** | 无 | 1 条 `/etc/sudoers.d/nas-sodo` |
+| **令牌与隔离** | 无（OS UID 边界） | 独立 `tmux -L nmux-<session>` + 内存 `@nmux_token` + stdin 传钥 |
+| **生命周期** | 关闭 tmux 即失效 | 关闭 tmux 即 server 退出、令牌自动销毁 |
+
+## 文档
+
+- [设计文档](docs/design.md) — 架构原理、双重身份模型、安全边界与 WSL 风险说明
+- [skills/nas-setup-guide/SKILL.md](skills/nas-setup-guide/SKILL.md) — 面向安装助手的引导 Skill（不安装）
+- [skills/nas-elevate/SKILL.md](skills/nas-elevate/SKILL.md) — 面向 Agent 的运行时提权 Skill
 
 ## License
 
 MIT
-
-## 致谢
-
-本项目受 remote-sudo-tmux 启发，专注于为 Agent 提供安全、透明、易用的提权机制。

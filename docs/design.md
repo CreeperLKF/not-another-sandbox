@@ -1,38 +1,26 @@
 # not-another-sandbox (NAS) / nmux — 设计文档
 
-> **不是又一个试图困死 Agent 的静态沙箱，而是一套面向终端协作的"有人值守权限委托（Attended Privilege Delegation）"机制。**
+> **不是又一个试图困死 Agent 的静态沙箱，而是一套面向终端协作的“有人值守权限委托（Attended Privilege Delegation）”机制。**
+
+---
 
 ## 1. 核心理念
 
-### 问题陈述
+### 问题与取舍
 
-Coding Agent 的权限困境：
-- **过度限制**：完全困在沙箱里，无法完成需要高权限的正常开发任务（安装依赖、配置系统、操作容器）
-- **过度开放**：给 Agent sudo 权限，任何误操作或恶意行为都可能破坏整个系统
+Coding Agent 在日常开发与系统运维中面临经典两难：
+- **静态沙箱过严**：无法完成安装依赖、修改系统配置等正常开发任务，且命令白名单极易绕过、维护成本高。
+- **直接给高权限过松**：任何误操作或 Prompt Injection 都可能波及宿主系统。
 
-传统沙箱的两难：
-- 静态边界要么太严（阻碍生产力）要么太松（失去安全保证）
-- 命令白名单极易绕过，且难以维护
-
-### NAS 的解决思路
-
-**从"不可逾越的沙箱"到"有人值守的委托"**：
-
-```
-平时：Agent 在低权限账户运行
-      ↓
-需要提权：人类在自己的会话中开启授权窗口
-      ↓
-Agent 连接：持有凭证，在人类监督下操作
-      ↓
-完成退出：凭证失效，Agent 回到低权限状态
-```
+NAS 转向更务实的范式：
+- **平时靠 OS 原生隔离**：Agent 运行在独立低权限账户下，默认没有任何提权通道。
+- **提权靠人类现场授权**：由人类开启受控终端会话并临时委托 Agent 介入，全程可见、关闭即撤权。
 
 ### 三个基本准则
 
-0. **简单到眼睛**：设计清晰，易于理解和审计
-1. **授权之前，我们提供和操作系统一样的安全**：默认无权，依托 OS 原生隔离
-2. **授权之后，我们提供和用户一样的权力**：不做脆弱的命令过滤，风险兜底交给人类实时观测
+0. **简单到眼睛**：零编译依赖，机制直观，任何人都可在数分钟内逐行审计。
+1. **授权之前，提供和操作系统一样的安全**：依托 OS 原生 UID/文件权限边界。
+2. **授权之后，提供和用户一样的权力**：不维护脆弱的子命令白名单，风险兜底交给人类实时观测与随时终止。
 
 ---
 
@@ -41,242 +29,134 @@ Agent 连接：持有凭证，在人类监督下操作
 ### 权限等级模型
 
 ```
-root (UID 0)          ← 系统管理员
+root  (UID 0)      ← 系统管理员
   ↓
-human (UID 1000)      ← 普通用户，Agent 想要提权到的目标
+human (UID 1000)   ← 人类日常开发账户（Agent 提权目标，或由人类在会话内继续 sudo）
   ↓
-agent (UID 1001+)     ← Agent 运行账户，默认低权限
+agent (UID 1001+)  ← Agent 运行账户，默认无特权
 ```
-
-**核心目标**：让 agent 能在人类监督下临时获得 human 账户的权限，而不是永久 sudo。
 
 ### 正交的双重身份模型
 
-NAS 将共享终端中的权限拆解为两个正交维度：
+- **执行身份（Execution Identity）**：由内核强制保障的终端执行主体（`human` 或 `root`），决定命令实际拥有什么权限。
+- **输入主体（Input Principal）**：向该终端发送键盘输入的操作者（人类或持有令牌的特定 Agent）。
 
-* **执行身份（Execution Identity）**：由操作系统内核强制保障的权限主体（human 或 root），决定会话内**能触及什么系统资源**
-* **输入主体（Input Principal）**：此刻向终端发起交互的操作者（人类或特定 Agent），由 `nmux` 负责**准入鉴权与边界管控**
+底层会话始终由人类掌控并实时旁观，Agent 获得的只是“在会话存活期间向其发送离散输入并读取屏幕快照”的临时委托权。
 
-关键：**执行身份不变，只是输入主体切换了**。底层终端会话的执行身份始终是人类的，Agent 获得的是"向这个会话发送输入"的权利。
+### 离散的“动作—观测”范式（Act-Observe）
 
-### 固定边界，而非审查内容
+直接复用原生 `tmux` 的终端渲染与状态保持能力：
+- **Act**：`send-keys` 注入命令
+- **Observe**：`capture-pane -p` 读取纯文本屏幕快照
 
-系统的安全保证落在"控制谁能跨过边界"，而不是"审查跨越边界的具体指令内容"：
-
-* **上下文授权**：人类授予的是对特定会话的临时接入权，而非逐条审批命令
-* **准入即全权（无白名单）**：一旦 Agent 通过会话鉴权，即拥有对该会话的完整操作能力；不做脆弱的命令白名单过滤
-* **风险兜底**：完全交给人类实时观测与随时撤权（关闭 tmux）
-
-### 离散的"动作—观测"交互范式
-
-```
-Agent 不是直接操作 PTY（复杂、易出错）
-而是：
-  action:  nmux send "ls -la"
-  observe: output = nmux read
-```
-
-直接复用原生终端复用器（tmux）的屏幕状态渲染能力，以离散的输入注入与屏幕快照读取作为核心交互范式。不引入高复杂度的流式 PTY 代理，避免终端控制符污染 Agent 上下文。
-
-### 生命周期与撤权
-
-* **令牌仅在单次 session 中有效**：令牌与 tmux 会话生命周期绑定
-* **无单独 revoke 操作**：关闭 tmux = 令牌失效，保持简单
-* **会话凭据与隔离态仅存在于内存**：不落盘持久化，会话关闭即彻底销毁，无残留状态
+不自造流式 PTY 代理，也不维护与 `tmux` 平行演进的命令集。
 
 ---
 
-## 3. 三种运行模式
+## 3. 两种运行模式
 
-为在不同安全假设与部署极简度之间灵活权衡，NAS 提供三种模式：
+NAS 提供一个**零依赖默认模式**与一个**多 Agent 隔离高级模式**：
 
-| 特性 | **direct** | **relay** | **sodo** |
-|-----|-----------|----------|---------|
-| **隔离机制** | OS 基础文件权限 | 内核级 IPC 边界 | OS 提权规则 + 内存态验权 |
-| **二进制组件** | 无，直接用 tmux | `nmux` + `nmuxd` | `nmux` |
-| **令牌验证** | 无 | 是 | 是 |
-| **后台进程** | 无 | `nmuxd` daemon | 无 |
-| **sudoers 配置** | 无 | 无 | 需要 |
-| **安全边界** | tmux socket (0700) | daemon socket + 令牌 | sudo + 内存令牌文件 |
-| **定位** | 效率最高，单 Agent | 安全边界最干净，多 Agent | 形态最极简，多 Agent |
+| 特性 | `direct`（默认） | `sodo`（高级） |
+|---|---|---|
+| **隔离边界** | OS 原生用户与 tmux socket (`0700`) | `sudoers` + 独立 tmux server + 内存令牌 |
+| **额外组件** | 无（直接调用原生 `tmux`） | 单文件纯 Shell `/usr/local/bin/nmux` |
+| **系统配置** | 无 | `/etc/nas/sodo.conf` + `/etc/sudoers.d/nas-sodo` |
+| **多 Agent 隔离** | 无（同 UID 下互信） | 有（仅持有会话令牌者可接入对应会话） |
+| **依赖** | `bash` + `tmux` | `bash` + `tmux` + `sudo` |
+| **凭据生命周期** | 无凭据，关闭 tmux 即结束 | 存于 tmux server 内存，关闭 tmux 即销毁 |
 
-### direct 模式（默认，单 Agent 场景）
+### 3.1 `direct` 模式（默认）
 
-**流程**：
-
-```
-Agent: "请在 agent 账户创建 tmux："
-Human: $ tmux new -s work              # 在 agent (UID 1001) 账户执行
-       $ su - human                     # 在 tmux 内切换到 human (UID 1000)
-       
-Agent: tmux send-keys -t work "apt install ..." Enter
-       tmux capture-pane -t work -p
-```
-
-**特点**：
-- 无额外组件，直接包装 tmux 命令
-- 无令牌验证，假设本机所有 agent 同等可信
-- 安全边界：tmux socket 权限 0700，只有同 UID 可访问
-- **适用场景**：单 agent，或多个完全互信的 agent
-
-### relay 模式（多 Agent，需要隔离）
-
-**流程**：
+适合单 Agent 或本机多 Agent 互信环境：
 
 ```
-Human: $ nmux create work              # 启动 nmuxd daemon（如果未运行）
-       Session token: abc-def-123      # 生成临时令牌
-       
-Agent: nmux attach work --token abc-def-123
-       → 连接到 nmuxd socket
-       → daemon 验证令牌
-       → 建立代理：agent ↔ daemon ↔ tmux
-       
-       nmux send work "apt install ..."  # 所有操作经过 daemon 转发
-       nmux read work
+Human (在 agent 账户):
+  $ tmux new -s work
+  $ su - <human>          # 在 tmux 内切换到人类账户（或按需 sudo）
+
+Agent (在 agent 账户):
+  $ tmux send-keys -t work "apt update" Enter
+  $ tmux capture-pane -t work -p
+
+Human 结束监督:
+  $ exit                  # 关闭 tmux，权限立即失效
 ```
 
-**特点**：
-- 有后台进程 `nmuxd` 管理令牌和会话
-- 令牌验证，只有持有令牌的 agent 可连接
-- Agent 始终停留在自身低权限身份下，仅通过受控通信通道传递数据
-- **攻击面**：daemon socket 暴露，需要防护（SO_PEERCRED 验证）
-- **适用场景**：多个互不信任的 agent
+### 3.2 `sodo` 模式（高级，多 Agent 隔离）
 
-### sodo 模式（多 Agent，无常驻进程）
-
-**流程**：
+当同一 `agent` UID 下运行多个互不信任的 Agent 时，启用 `sodo` 模式，通过**单文件 `/usr/local/bin/nmux`** 完成跨用户鉴权与透传：
 
 ```
-Human: $ nmux create work
-       → 创建 tmux + su - human
-       → 保存令牌到 /dev/shm/nmux-work （内存文件，权限 0600）
-       Session token: abc-def-123
-       
-Agent: echo "abc-def-123" | nmux send-keys -t work "apt install ..." Enter
-       → nmux 调用 sudo /usr/local/bin/nmux-verify <session> <token> exec -- tmux send-keys ...
-       → nmux-verify 验证令牌（读取 /dev/shm/nmux-work 比对）
-       → 验证通过后执行 tmux 命令
-       
-       echo "abc-def-123" | nmux capture-pane -t work -p
-```
+Human (在 human 账户):
+  $ nmux create work
+    -> 启动独立 tmux server: tmux -L nmux-work new-session -d -s work
+    -> 生成随机 UUID，仅写入该 server 内存选项: @nmux_token
+    -> 打印 Token，人类复制给指定 Agent 后按 Enter attach 盯屏
 
-**特点**：
-- 无后台进程，每次操作都通过 sudo 调用验证脚本
-- **为什么需要 nmux-verify**：不能让 agent 直接 `sudo tmux`（会绕过令牌验证），必须通过守门员脚本
-- Sudoers 配置：`agent ALL=(human) NOPASSWD: /usr/local/bin/nmux-verify`
-- 每次操作传入令牌（stdin），验证后转发给 tmux（无命令白名单）
-- 侵入性配置：需要 sudoers 规则，提供 uninstall.sh 清理
-- 性能开销：每次操作都触发 sudo
-- **适用场景**：多 agent，不想跑 daemon，接受 sudoers 侵入性
+Agent (在 agent 账户):
+  $ printf '%s\n' "$TOKEN" | nmux work send-keys -t work "apt update" Enter
+    -> nmux 识别当前为 agent，自动执行:
+       exec sudo -n -u <human> /usr/local/bin/nmux work send-keys -t work ...
+       （stdin 原样穿透 sudo，token 绝不进入命令行参数）
+    -> 提权后的 nmux（检测到 SUDO_USER 非空，强制走 Agent 鉴权路径）:
+       1. 校验 session 名称正则与 tmux 子命令格式（拒绝 -L/-S/-f 等全局选项）
+       2. 从 stdin 读取第一行 token
+       3. 查询 tmux -L nmux-work show-option -gqv @nmux_token 比对
+       4. 校验通过后 exec tmux -L nmux-work "$@"
+
+Human 结束监督:
+  $ exit 或 nmux kill work
+    -> 独立 tmux server (nmux-work) 退出
+    -> /tmp/tmux-<human_uid>/nmux-work 与内存 @nmux_token 自动消失，零残留
+```
 
 ---
 
-## 4. 关键安全约束
+## 4. 关键安全不变量（`sodo` 模式）
 
-设计落地时必须严格守住以下约束：
+1. **不可篡改的信任根**
+   - `/usr/local/bin/nmux` 与 `/etc/nas/sodo.conf` 均由 `root:root` 持有且对 Agent 不可写；`nmux` 启动时校验配置文件非符号链接、属主为 `root` 且无组/其他写权限。
+   - `nmux` 使用 `#!/bin/bash -p`、硬编码 `PATH`、`unset TMUX TMUX_TMPDIR`，并配合 sudoers 的 `Defaults!/usr/local/bin/nmux env_reset`，抵御环境变量注入（`BASH_ENV`/`TMUX_TMPDIR` 等）。
+   - `nmux` 只要检测到 `SUDO_USER` 非空，强制进入 Agent 验权路径，杜绝通过 sudo 触发人类管理子命令（`create`/`kill` 等）。
 
-### 1. 不可篡改的信任根
+2. **杜绝命令行参数泄漏凭据**
+   - 同 UID 进程可读取 `/proc/<pid>/cmdline` 与 `/proc/<pid>/environ`。
+   - `nmux` 强制要求从 **stdin** 读取 token，并在调用 `sudo` 时使用 `-n`（非交互模式），防止误将 token 当作密码吞掉。
 
-- `nmux` 入口本身必须由系统管理员持有且对 Agent 只读，防止被篡改逻辑
-- 在非 direct 模式下，底层原生会话通道（tmux socket）必须对 Agent 严格不可访问
+3. **会话名注入与跨会话逃逸防护**
+   - `<session>` 严格校验匹配 `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`，杜绝 `../` 路径穿越（防止指向 Agent 伪造的 tmux server 绕过鉴权）及 tmux target 分隔符注入。
+   - 透传给 `tmux` 的首个参数严格校验匹配 `^[a-z][a-z0-9-]*$`，彻底禁止 `-L`、`-S`、`-f` 等全局参数覆盖独立 socket 或加载任意配置文件（防止逃逸到人类默认 tmux 或读取敏感文件），同时保持对全部 tmux 子命令的无白名单透传。
 
-### 2. 令牌泄漏防护
+4. **凭据与会话同生共死**
+   - 不使用 `/dev/shm` 或磁盘文件落盘 token；令牌仅存活于对应独立 tmux server 内存中。无单独 `revoke` 命令，关闭 tmux 即彻底撤权。
 
-**问题**：同 UID 下的其他进程可以读取 `/proc/<pid>/cmdline` 和 `/proc/<pid>/environ`
-
-**方案**：
-
-- **标准输入传递**（推荐）：
-  ```bash
-  echo "$TOKEN" | nmux attach work --token -
-  ```
-
-- **SO_PEERCRED 验证**（relay daemon）：
-  - daemon accept 时检查连接来自 agent UID
-  - 令牌只验证一次，后续靠 socket 持久连接
-
-- **内存文件 + 严格权限**（sodo）：
-  ```bash
-  TOKEN_FILE=/dev/shm/nmux-$SESSION
-  chmod 600 "$TOKEN_FILE"
-  ```
-
-### 3. 多 Agent 互不信任模型
-
-- 一个会话可以因为令牌被共享而授权给多个 agent
-- 父子 agent 令牌传递行为不干预，由上层决定
-- 同一令牌可以被多个进程同时使用（relay 模式通过 socket 连接池管理）
-
-### 4. 不设指令白名单，明确责任边界
-
-鉴权通过即代表该会话内对 Agent 的完全操作授权，系统不承诺通过子命令白名单阻断危险操作；真正的安全防线是"默认无权 + 显式准入 + 人类值守 + 即时销毁"的闭环。
+5. **设计边界说明**
+   - 按照“准入即全权（无白名单）”原则，一旦 Agent 持有有效令牌，即可向对应 `nmux-<session>` 发送任意 tmux 子命令（注：包含 `run-shell` 等非屏幕输出子命令，权限等价于已授权的 `human` 会话）；系统防线核心在于“未授权绝不可跨边界 + 跨会话严格隔离 + 人类值守与即时销毁”。
 
 ---
 
-## 5. WSL 互操作加固（可选）
+## 5. WSL 互操作加固说明（可选）
 
-### 威胁模型
+在 WSL 环境中，`/run/WSL/*_interop` socket 默认权限为 `0777`，任何低权限用户均可通过 `binfmt_misc` 调用 Windows 侧 `wsl.exe -u root` 绕过 OS 隔离。
 
-在 WSL 环境中，存在已知的提权绕过路径：
-
-```
-当前问题：agent (UID 1001) 可以通过 binfmt_misc 机制：
-  → 执行任意 Windows PE 文件
-  → 触发 /init 解释器
-  → 连接 /run/WSL/*_interop socket (权限 0777)
-  → 调用 wsl.exe -u root
-  → 直接提权到 root，绕过所有限制
-```
-
-### 修补目标
-
-让互操作仅在默认用户 (UID 1000) 和 root 下可用，阻断其他用户通过 binfmt 提权。
-
-**注意**：此修补为可选功能，setup 时提供两个子选项：
-1. 是否修补（需要编译 WSL 源码，替换 `/init`）
-2. 是否在 agent 提示词中添加"不要使用 wsl.exe 提权"的警告
+- `install.sh` 会自动检测该风险，并可选择向 Agent 写入软提醒（`~/.claude/prompts/wsl-warning.txt`）。
+- 彻底封堵需在 WSL 层限制互操作（如禁用 interop 或修补 `/init` 的 socket 权限）。
 
 ---
 
-## 6. 组件清单
+## 6. 仓库结构
 
 ```
 not-another-sandbox/
-├── cmd/
-│   ├── nas-setup/          # Setup TUI（Go/Rust）
-│   ├── nmux/               # CLI（relay/sodo 模式）
-│   └── nmuxd/              # Daemon（relay 模式）
-├── pkg/
-│   ├── daemon/             # Daemon 实现
-│   ├── token/              # 令牌生成与验证
-│   └── tunnel/             # Agent ↔ tmux 隧道
-├── skills/
-│   ├── setup-guide.md      # 不安装，仅 README 引用
-│   └── nas-elevate.md      # 运行时提权（setup 生成）
+├── README.md                        # 快速开始（默认 direct，高级 sodo）
+├── install.sh                       # 交互/非交互安装脚本
+├── uninstall.sh                     # 清理 sudoers、nmux、配置与 skill
 ├── scripts/
-│   └── account-setup.sh    # Agent 账户创建辅助脚本
-├── docs/
-│   └── design.md           # 本文档
-└── README.md
+│   └── nmux                         # sodo 模式单文件纯 Shell 入口
+├── skills/
+│   ├── nas-setup-guide/SKILL.md     # 安装引导 Skill（README 引用，不安装）
+│   └── nas-elevate/SKILL.md         # 运行时提权 Skill（安装时按模式渲染）
+└── docs/
+    └── design.md                    # 本文档
 ```
-
----
-
-## 7. 实现路线图
-
-1. ✓ 架构设计与文档
-2. Skills 编写（使用 skill-creator）
-3. Setup TUI 实现
-4. nmux CLI 实现（relay/sodo）
-5. nmuxd daemon 实现（relay）
-6. 集成测试与文档完善
-
----
-
-## 8. 参考资料
-
-- tmux 手册：生命周期管理、send-keys、capture-pane
-- unix(7)：Unix domain socket 权限模型
-- SO_PEERCRED：peer credential 验证
-- WSL 源码：`microsoft/WSL` 仓库，`src/linux/init/` 目录

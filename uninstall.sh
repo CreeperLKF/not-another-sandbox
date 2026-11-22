@@ -1,134 +1,124 @@
 #!/bin/bash
-# Uninstall script for not-another-sandbox
+# Uninstall script for not-another-sandbox (NAS)
 
-set -e
+set -euo pipefail
+
+AUTO_YES=0
+AGENT_USER=""
+HUMAN_USER=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -y|--yes) AUTO_YES=1; shift ;;
+    --agent) AGENT_USER="${2:-}"; shift 2 ;;
+    -h|--help)
+      echo "Usage: ./uninstall.sh [-y|--yes] [--agent <username>]"
+      exit 0
+      ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+# Auto-detect accounts from /etc/nas/sodo.conf if present
+if [ -f /etc/nas/sodo.conf ]; then
+  while IFS='=' read -r key val; do
+    case "$key" in
+      AGENT_USER) [ -z "$AGENT_USER" ] && AGENT_USER="$val" ;;
+      HUMAN_USER) [ -z "$HUMAN_USER" ] && HUMAN_USER="$val" ;;
+    esac
+  done < /etc/nas/sodo.conf
+fi
+
+# Fallback: try default agent account if still unknown
+if [ -z "$AGENT_USER" ] && id nas-agent >/dev/null 2>&1; then
+  AGENT_USER="nas-agent"
+fi
 
 echo "=== not-another-sandbox Uninstall ==="
 echo ""
-
-# Detect mode
-if [ -f ~/.config/nas/mode ]; then
-  MODE=$(cat ~/.config/nas/mode)
-  echo "Detected mode: $MODE"
-else
-  echo "No installation detected in ~/.config/nas/"
-  read -p "Continue anyway? (y/N) " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    exit 0
-  fi
-  MODE="unknown"
-fi
-
-echo ""
 echo "This will remove:"
-echo "  - Sudoers entries (/etc/sudoers.d/nas-*)"
-echo "  - System binaries (/usr/local/bin/nmux*)"
-echo "  - Configuration files (~/.config/nas/)"
-echo "  - Agent skills (~/.claude/skills/nas-elevate)"
-echo "  - Active tokens (/dev/shm/nmux-*)"
-echo "  - Running tmux sessions (if any)"
+echo "  - Sudoers rule (/etc/sudoers.d/nas-sodo)"
+echo "  - System script (/usr/local/bin/nmux)"
+echo "  - System config (/etc/nas/)"
+if [ -n "$AGENT_USER" ]; then
+  echo "  - Agent config & skill (~$AGENT_USER/.config/nas, ~$AGENT_USER/.claude/skills/nas-elevate)"
+fi
+echo "  - Active nmux-* tmux sessions (if any)"
 echo ""
-read -p "Proceed with uninstall? (y/N) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-  echo "Cancelled."
-  exit 0
+
+if [ "$AUTO_YES" -eq 0 ]; then
+  read -r -p "Proceed with uninstall? [y/N]: " REPLY
+  [[ "$REPLY" =~ ^[Yy]$ ]] || { echo "Cancelled."; exit 0; }
 fi
 
-echo ""
-echo "--- Checking for active sessions ---"
-SESSIONS=$(tmux list-sessions 2>/dev/null | grep -E '^(nas|work|elevated)' || true)
-if [ -n "$SESSIONS" ]; then
-  echo "Warning: Found potentially related tmux sessions:"
-  echo "$SESSIONS"
-  echo ""
-  read -p "Kill these sessions? (y/N) " -n 1 -r
-  echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    tmux list-sessions 2>/dev/null | grep -E '^(nas|work|elevated)' | cut -d: -f1 | xargs -I{} tmux kill-session -t {}
-    echo "Sessions killed."
-  else
-    echo "Skipping session cleanup. You may need to close them manually."
-  fi
+# 1. Kill active nmux-* tmux servers (both current user and configured human user)
+cleanup_user_sockets() {
+  local target_user="$1"
+  local target_uid
+  target_uid="$(id -u "$target_user" 2>/dev/null || true)"
+  [ -n "$target_uid" ] || return 0
+  local sock_dir="/tmp/tmux-$target_uid"
+  [ -d "$sock_dir" ] || return 0
+  shopt -s nullglob
+  for sock in "$sock_dir"/nmux-*; do
+    [ -S "$sock" ] || continue
+    local base="${sock##*/}"
+    echo "Stopping tmux server ($target_user): $base"
+    if [ "$(id -un)" = "$target_user" ]; then
+      tmux -L "$base" kill-server 2>/dev/null || true
+      rm -f "$sock" 2>/dev/null || true
+    else
+      sudo -u "$target_user" tmux -L "$base" kill-server 2>/dev/null || true
+      sudo rm -f "$sock" 2>/dev/null || true
+    fi
+  done
+  shopt -u nullglob
+}
+
+cleanup_user_sockets "$(id -un)"
+if [ -n "$HUMAN_USER" ] && [ "$HUMAN_USER" != "$(id -un)" ]; then
+  cleanup_user_sockets "$HUMAN_USER"
 fi
 
-echo ""
-echo "--- Removing sudoers entries ---"
-if [ -d /etc/sudoers.d ]; then
-  SUDOERS_FILES=$(sudo find /etc/sudoers.d -name 'nas-*' 2>/dev/null || true)
-  if [ -n "$SUDOERS_FILES" ]; then
-    echo "$SUDOERS_FILES" | while read -r file; do
-      echo "  Removing: $file"
-      sudo rm "$file"
-    done
-  else
-    echo "  No sudoers entries found."
-  fi
-else
-  echo "  /etc/sudoers.d not found (skipping)"
+# 2. Remove sudoers entry
+if [ -f /etc/sudoers.d/nas-sodo ]; then
+  echo "Removing /etc/sudoers.d/nas-sodo"
+  sudo rm -f /etc/sudoers.d/nas-sodo
 fi
 
-echo ""
-echo "--- Removing system binaries ---"
-for bin in nmux nmux-verify nmuxd; do
-  if [ -f /usr/local/bin/$bin ]; then
-    echo "  Removing: /usr/local/bin/$bin"
-    sudo rm /usr/local/bin/$bin
+# 3. Remove /usr/local/bin/nmux (and legacy nmux-verify / nmuxd if any)
+for bin in /usr/local/bin/nmux /usr/local/bin/nmux-verify /usr/local/bin/nmuxd; do
+  if [ -f "$bin" ]; then
+    echo "Removing $bin"
+    sudo rm -f "$bin"
   fi
 done
 
-echo ""
-echo "--- Removing configuration ---"
-if [ -d ~/.config/nas ]; then
-  echo "  Removing: ~/.config/nas/"
-  rm -rf ~/.config/nas
+# 4. Remove /etc/nas
+if [ -d /etc/nas ]; then
+  echo "Removing /etc/nas"
+  sudo rm -rf /etc/nas
 fi
 
-# Also check for agent user config if we can determine it
-if [ -f ~/.config/nas/config ]; then
-  AGENT_USER=$(grep agent_user ~/.config/nas/config | cut -d= -f2)
-  if [ -n "$AGENT_USER" ] && id "$AGENT_USER" &>/dev/null; then
-    echo "  Removing agent config: /home/$AGENT_USER/.config/nas/"
-    sudo rm -rf /home/$AGENT_USER/.config/nas 2>/dev/null || true
+# 5. Remove agent configs and skill
+if [ -n "$AGENT_USER" ] && id "$AGENT_USER" >/dev/null 2>&1; then
+  AGENT_HOME="$(getent passwd "$AGENT_USER" | cut -d: -f6)"
+  if [ -n "$AGENT_HOME" ]; then
+    for target in "$AGENT_HOME/.config/nas" "$AGENT_HOME/.claude/skills/nas-elevate" "$AGENT_HOME/.claude/prompts/wsl-warning.txt"; do
+      if [ -e "$target" ]; then
+        echo "Removing $target"
+        sudo rm -rf "$target"
+      fi
+    done
   fi
 fi
 
-echo ""
-echo "--- Removing skills ---"
-SKILL_PATH=~/.claude/skills/nas-elevate
-if [ -d "$SKILL_PATH" ]; then
-  echo "  Removing: $SKILL_PATH"
-  rm -rf "$SKILL_PATH"
-fi
-
-# Also check agent user
-if [ -n "$AGENT_USER" ] && id "$AGENT_USER" &>/dev/null; then
-  AGENT_SKILL_PATH=/home/$AGENT_USER/.claude/skills/nas-elevate
-  if [ -d "$AGENT_SKILL_PATH" ]; then
-    echo "  Removing: $AGENT_SKILL_PATH"
-    sudo rm -rf "$AGENT_SKILL_PATH" 2>/dev/null || true
-  fi
-fi
+# 6. Clean up legacy /dev/shm/nmux-* if any exist from older versions
+sudo rm -f /dev/shm/nmux-* 2>/dev/null || true
 
 echo ""
-echo "--- Cleaning up tokens ---"
-TOKEN_COUNT=$(ls /dev/shm/nmux-* 2>/dev/null | wc -l)
-if [ "$TOKEN_COUNT" -gt 0 ]; then
-  echo "  Found $TOKEN_COUNT token files in /dev/shm/"
-  rm -f /dev/shm/nmux-* 2>/dev/null || sudo rm -f /dev/shm/nmux-*
-  echo "  Tokens removed."
-else
-  echo "  No active tokens found."
+echo "=== Uninstall Complete ==="
+if [ -n "$AGENT_USER" ]; then
+  echo "Note: Agent user account '$AGENT_USER' was NOT deleted."
+  echo "To delete it manually: sudo userdel -r $AGENT_USER"
 fi
-
-echo ""
-echo "=== Uninstall complete ==="
-echo ""
-echo "The following were NOT removed (manual cleanup if needed):"
-echo "  - Agent user account (if created during installation)"
-echo "  - Built relay binaries in $(pwd)/bin/"
-echo "  - Source code in $(pwd)/"
-echo ""
-echo "To remove the agent account (example):"
-echo "  sudo userdel -r <agent-username>"
