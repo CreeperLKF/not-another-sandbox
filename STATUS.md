@@ -21,45 +21,43 @@
   - Interactive setup flow
 
 ### Implementation
-- [x] Setup TUI (`cmd/nas-setup/`)
-  - Interactive mode selection
-  - Account configuration
-  - WSL hardening options
-  - Progress tracking
-- [x] nmux CLI (`cmd/nmux/`)
-  - `create` - Generate sessions with tokens
-  - `attach` - Token-based authentication
-  - `send` - Command execution
-  - `read` - Output capture
-  - `list` - Session listing
-- [x] nmuxd daemon (`cmd/nmuxd/`)
-  - Unix socket server
-  - SO_PEERCRED verification
-  - Connection handling
-- [x] Build system (Makefile)
-- [x] Go modules setup
+- [x] Interactive install script (`install.sh`)
+  - Mode selection with recommendations
+  - Account creation
+  - WSL vulnerability detection
+  - Mode-specific installation
+  - Skill generation
+- [x] Direct mode (pure shell)
+  - Zero dependencies beyond bash + tmux
+  - No binaries, no tokens
+- [x] Sodo mode (shell + sudoers)
+  - `scripts/nmux-sodo.sh` - Token wrapper
+  - `scripts/nmux-verify.sh` - Sudo verification
+  - Zero Go dependencies
+- [x] Relay mode (Go binaries)
+  - `relay/cmd/nmux/` - CLI with crypto/rand tokens
+  - `relay/cmd/nmuxd/` - Minimal daemon
+  - Only built when relay mode selected
+- [x] Build system (Makefile for relay only)
 
 ## 🚧 Known Limitations
 
-### Token Generation
-Current implementation uses simple token generation in `nmux/main.go`. For production:
-- Replace with crypto/rand for secure random tokens
-- Add token expiration timestamps
-- Implement token revocation mechanism
-
-### Daemon Protocol
-`nmuxd` connection handling is stubbed. Needs:
+### Relay Mode Daemon Protocol
+`nmuxd` connection handling is minimal. For production:
 - Binary protocol definition (session ID, token, command, response)
 - Session state management
 - Multiple concurrent client support
 - Graceful shutdown with session preservation
 
-### Setup TUI Installation Logic
-`nas-setup/main.go` has placeholder `startInstallation()`. Needs:
-- Complete tmux command sequences
-- Build binary compilation steps
-- Skill file generation and installation
-- Error handling and rollback
+### Token Expiration
+Current tokens never expire. Consider:
+- Timestamp-based expiration
+- Explicit revoke command
+- Auto-cleanup on tmux session close
+
+### Sodo Mode Token Passing
+`nmux-sodo.sh` uses environment variable `$NAS_TOKEN` for send/read.
+Better approach: pass via stdin on each call
 
 ### Testing
 No test coverage yet. Needs:
@@ -128,9 +126,9 @@ No test coverage yet. Needs:
 - **WSL hardening optional**: User can skip if single-agent trusted environment.
 
 ### Known Issues
-- [ ] `go.mod` missing dependencies (needs `go mod tidy`)
-- [ ] Setup TUI window size handling incomplete
-- [ ] nmux token generation reads from os.Stdin incorrectly (should use crypto/rand)
+- [ ] `relay/go.mod` needs `go mod tidy` before building
+- [ ] Sodo mode token passing via env var (should use stdin)
+- [ ] Install script assumes tmux session named "nas-setup" exists
 
 ### Future Enhancements
 - Consider abstract Unix sockets for daemon (no filesystem cleanup)

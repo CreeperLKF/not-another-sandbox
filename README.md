@@ -15,18 +15,22 @@
 ### 安装
 
 ```bash
-# 下载并运行安装向导
+# 下载并运行安装脚本
 git clone https://github.com/CreeperLKF/not-another-sandbox.git
 cd not-another-sandbox
-make build
-sudo ./bin/nas-setup
+./install.sh
 ```
 
-安装向导将引导你：
+安装脚本将引导你：
 1. 选择模式（direct/relay/sodo）
 2. 配置 agent 账户
-3. 检测并修补 WSL 漏洞（如适用）
+3. 检测 WSL 漏洞（如适用）
 4. 完成安装
+
+**依赖**：
+- Direct 模式：仅需 bash + tmux
+- Sodo 模式：bash + tmux + sudo
+- Relay 模式：需要 Go（或下载预编译二进制）
 
 ### 使用
 
