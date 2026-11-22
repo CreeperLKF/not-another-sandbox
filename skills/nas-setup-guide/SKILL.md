@@ -54,6 +54,8 @@ Run a quick smoke test with `whoami`:
 - **Direct mode**: Human opens `tmux new -s work` as `<agent>` and runs `su - <human>`; agent runs `tmux send-keys -t work "whoami" Enter` and `tmux capture-pane -t work -p`.
 - **Sodo mode**: Human runs `nmux create work`, copies token to agent, attaches; agent runs `printf '%s\n' "$TOKEN" | nmux work send-keys -t work "whoami" Enter` and `printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p`.
 
-Remind the user:
-- Always close elevated tmux sessions when done (`exit` / `tmux ls` / `nmux ls`).
-- To uninstall at any time: `./uninstall.sh`.
+Remind and brief the user on daily usage after setup succeeds:
+- How to start their agent inside the low-privilege account (e.g., `sudo -u <agent> -i`).
+- How to respond when `/nas-elevate` requests elevation in the installed mode (`direct` or `sodo`).
+- Basic `tmux` controls: attach (`tmux attach -t <name>` / `nmux attach <name>`), detach (`Ctrl+b` then `d` — note that detaching does **not** revoke access), normal exit (`exit`), and emergency force-kill (`tmux kill-session -t <name>` / `nmux kill <name>`, or `Ctrl+b` then `:kill-session`).
+- Always check for orphan elevated sessions (`tmux ls` / `nmux ls`), and note that `./uninstall.sh` cleanly removes the installation at any time.
