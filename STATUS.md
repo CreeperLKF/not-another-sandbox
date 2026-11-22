@@ -56,8 +56,13 @@ Current tokens never expire. Consider:
 - Auto-cleanup on tmux session close
 
 ### Sodo Mode Token Passing
-`nmux-sodo.sh` uses environment variable `$NAS_TOKEN` for send/read.
-Better approach: pass via stdin on each call
+`nmux-sodo.sh` now uses `auth` command for one-time authentication, then forwards all tmux commands after token verification. No command whitelist - follows "full power after authorization" principle.
+
+Workflow:
+```bash
+echo "$TOKEN" | nmux auth <session>  # Sets NAS_TOKEN/NAS_SESSION
+nmux <any-tmux-command>              # Verified, then forwarded to tmux
+```
 
 ### Testing
 No test coverage yet. Needs:

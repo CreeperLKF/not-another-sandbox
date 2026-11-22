@@ -36,6 +36,12 @@ case "$ACTION" in
     tmux capture-pane -t "$SESSION" -p
     ;;
 
+  exec)
+    # Execute arbitrary command after token verification
+    # Expects: nmux-verify <session> <token> exec -- <command> [args...]
+    exec "$@"
+    ;;
+
   *)
     echo "Error: Unknown action: $ACTION" >&2
     exit 1
