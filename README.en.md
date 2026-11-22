@@ -208,6 +208,12 @@ We prefer putting assumptions and limits in plain sight:
 
 ---
 
+## In Development
+
+- **WSL Interop Patch**: An out-of-the-box hardening patch for the default WSL2 `0777` `/run/WSL/*_interop` socket bypass, blocking low-privilege agent escape paths while keeping Windows interop usable for the human account.
+
+---
+
 ## Project Layout
 
 Small enough to read end-to-end in a few minutes:

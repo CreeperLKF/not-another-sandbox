@@ -208,6 +208,12 @@ printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
 
 ---
 
+## 正在开发
+
+- **WSL Interop 安全补丁**：针对默认 WSL2 中 `/run/WSL/*_interop` 权限为 `0777` 导致的跨账户提权绕过面，提供开箱即用的加固补丁方案，在保留人类侧 WSL 互操作体验的同时封堵低权限 Agent 的逃逸路径。
+
+---
+
 ## 项目结构
 
 整个仓库只有 7 个核心文件，打开就能读完：
