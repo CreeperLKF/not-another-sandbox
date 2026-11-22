@@ -21,6 +21,16 @@ You're helping the human set up a system that will later allow *other* agents (o
 6. **Generate runtime skill** (/nas-elevate) based on chosen mode
 7. **Test and verify** the installation
 
+## Important: Uninstallation
+
+Before starting installation, inform the user that sodo mode modifies system configuration (sudoers). An uninstall script is provided:
+
+```bash
+./uninstall.sh
+```
+
+This removes sudoers entries, system binaries, configs, skills, and active tokens. The agent user account is NOT removed automatically (requires manual `userdel`).
+
 ## Phase 1: Discovery
 
 Ask the user:

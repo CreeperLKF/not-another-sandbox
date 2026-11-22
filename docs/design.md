@@ -150,20 +150,25 @@ Agent: nmux attach work --token abc-def-123
 ```
 Human: $ nmux create work
        → 创建 tmux + su - human
-       → 保存令牌到 /dev/shm/nmux-work （内存文件）
+       → 保存令牌到 /dev/shm/nmux-work （内存文件，权限 0600）
        Session token: abc-def-123
        
-Agent: nmux attach work abc-def-123
-       → 通过 sudo 调用 nmux-verify（sudoers 配置）
-       → verify 读取 /dev/shm/nmux-work，验证令牌
-       → 执行 tmux send-keys / capture-pane
+Agent: echo "abc-def-123" | nmux send-keys -t work "apt install ..." Enter
+       → nmux 调用 sudo /usr/local/bin/nmux-verify <session> <token> exec -- tmux send-keys ...
+       → nmux-verify 验证令牌（读取 /dev/shm/nmux-work 比对）
+       → 验证通过后执行 tmux 命令
+       
+       echo "abc-def-123" | nmux capture-pane -t work -p
 ```
 
 **特点**：
-- 无后台进程，每次操作都 sudo 调用验证脚本
-- 侵入性配置：需要 sudoers 规则
+- 无后台进程，每次操作都通过 sudo 调用验证脚本
+- **为什么需要 nmux-verify**：不能让 agent 直接 `sudo tmux`（会绕过令牌验证），必须通过守门员脚本
+- Sudoers 配置：`agent ALL=(human) NOPASSWD: /usr/local/bin/nmux-verify`
+- 每次操作传入令牌（stdin），验证后转发给 tmux（无命令白名单）
+- 侵入性配置：需要 sudoers 规则，提供 uninstall.sh 清理
 - 性能开销：每次操作都触发 sudo
-- **适用场景**：不想运行 daemon，但需要多 agent 隔离
+- **适用场景**：多 agent，不想跑 daemon，接受 sudoers 侵入性
 
 ---
 
