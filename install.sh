@@ -260,37 +260,40 @@ RENDERED_BLOCK="$(mktemp)"
 if [ "$MODE" = "direct" ]; then
   cat <<EOF > "$RENDERED_BLOCK"
 <!-- MODE_MARKER_START -->
-**Current mode: \`direct\`** (human account: \`$HUMAN_USER\`)
+**Current mode: \`direct\`** (human account: \`$HUMAN_USER\`, agent account: \`$AGENT_USER\`)
 
-1. Ask the human to run (in agent account \`$AGENT_USER\`):
+1. Ask the human to run in **agent account \`$AGENT_USER\`** (if currently in \`$HUMAN_USER\`, switch first via \`sudo -u $AGENT_USER -i\`):
    \`\`\`bash
-   tmux new -s work
+   tmux new -s <session>
    su - $HUMAN_USER
    \`\`\`
-2. Once confirmed, interact directly via tmux:
+   *(If root is needed, the human can also run \`sudo -v\` inside the pane.)*
+2. Once confirmed, verify identity (\`id\`) and interact via tmux:
    \`\`\`bash
-   tmux send-keys -t work "apt update" Enter
-   tmux capture-pane -t work -p
+   tmux send-keys -t <session> 'id' Enter
+   tmux capture-pane -t <session> -p | tail -80
+   tmux send-keys -t <session> '<command>' Enter
    \`\`\`
-3. Tell the human when done so they can close tmux (\`exit\` / \`tmux kill-session -t work\`).
+3. Tell the human when done so they can destroy \`<session>\` (\`exit\` until the tmux session closes, or \`tmux kill-session -t <session>\`).
 <!-- MODE_MARKER_END -->
 EOF
 else
   cat <<EOF > "$RENDERED_BLOCK"
 <!-- MODE_MARKER_START -->
-**Current mode: \`sodo\`** (human account: \`$HUMAN_USER\`)
+**Current mode: \`sodo\`** (human account: \`$HUMAN_USER\`, agent account: \`$AGENT_USER\`)
 
-1. Ask the human to run (in human account \`$HUMAN_USER\`):
+1. Ask the human to run in **human account \`$HUMAN_USER\`** (not in \`$AGENT_USER\`):
    \`\`\`bash
-   nmux create work
+   nmux create <session>
    \`\`\`
-   The human copies the printed token to you and presses Enter to attach and supervise.
-2. Interact via \`nmux\`, passing the token on **stdin** on every call (never in argv):
+   The human copies the printed token to you and presses Enter to attach and supervise *(and runs \`sudo -v\` inside the pane if root is needed)*.
+2. Once confirmed, verify identity (\`id\`) and interact via \`nmux\`, passing the token on **stdin** on every call (never in argv):
    \`\`\`bash
-   printf '%s\n' "\$TOKEN" | nmux work send-keys -t work "apt update" Enter
-   printf '%s\n' "\$TOKEN" | nmux work capture-pane -t work -p
+   printf '%s\n' "\$TOKEN" | nmux <session> send-keys -t <session> 'id' Enter
+   printf '%s\n' "\$TOKEN" | nmux <session> capture-pane -t <session> -p | tail -80
+   printf '%s\n' "\$TOKEN" | nmux <session> send-keys -t <session> '<command>' Enter
    \`\`\`
-3. Tell the human when done so they can close tmux (\`exit\` or \`nmux kill work\`), which immediately destroys the in-memory token.
+3. Tell the human when done so they can destroy \`<session>\` (\`exit\` or \`nmux kill <session>\`), which immediately destroys the in-memory token.
 <!-- MODE_MARKER_END -->
 EOF
 fi
