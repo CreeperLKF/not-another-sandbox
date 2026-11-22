@@ -90,20 +90,22 @@ No test coverage yet. Needs:
 
 ## 🧪 Testing Plan
 
-1. **Direct mode smoke test**
-   - Create agent account
-   - Create tmux session
-   - Send commands via tmux send-keys
-   - Verify output capture
+1. **Direct mode smoke test** - ✅ COMPLETED (2026-11-22)
+   - Session creation, command injection, output capture verified
+   - Multi-command sequences work correctly
+   - Tested on A14 WSL (Ubuntu 24.04.5, tmux 3.4)
+   - See TEST-RESULTS.md for details
 
-2. **Relay mode functional test**
-   - Start nmuxd daemon
-   - Create session with token
-   - Attach from agent account
-   - Send/read commands
-   - Verify isolation
+2. **Sodo mode token test** - ⚠️ PARTIAL (2026-11-22)
+   - Token generation via uuidgen works
+   - Token storage with 0600 permissions verified
+   - Full verification flow requires sudoers configuration
 
-3. **Skills evaluation**
+3. **Relay mode functional test** - ⏸️ PENDING
+   - Requires Go build and daemon setup
+   - Token passing via stdin needs verification
+
+4. **Skills evaluation** - ⏸️ PENDING
    - Use skill-creator to test nas-elevate
    - Create eval scenarios (package install, config change, service restart)
    - Measure token handling correctness
