@@ -43,7 +43,7 @@
 
 ## 快速开始（默认：`direct` 模式）
 
-**`direct` 是推荐且默认的安装模式**——零额外二进制、零 `sudoers` 修改、零卸载负担，只需要 `bash` + `tmux`。
+**`direct` 是推荐且默认的安装模式**——零额外二进制、零侵入式修改、零卸载负担，只需要 `bash` + `tmux`。
 
 ### 方式 A：直接运行安装脚本
 
@@ -83,7 +83,7 @@ cd not-another-sandbox
 > tmux capture-pane -t work -p
 > ```
 >
-> **Human**：在自己的 tmux 窗口里实时看着每一条命令跑完；一旦发现异常，直接关掉 tmux 瞬间中断。
+> **Human**：在自己的 tmux 窗口里实时看着每一条命令跑完；一旦发现异常，随时 `exit` 或销毁会话即可中断。
 >
 > **Agent**：安装已完成，你可以关闭会话了。
 >
@@ -144,7 +144,7 @@ Linux / macOS 的**多用户隔离**是经过数十年实战验证的内核级�
 
 在 `direct` 模式下，同一个 `agent` UID 下的所有进程都能访问该 tmux socket（适合单 Agent 或彼此完全信任的多 Agent）。
 
-如果你在同一低权限账户下运行**多个互不信任的 Agent**，希望**只有拿到本次临时令牌的那个 Agent**才能操作提权窗口，可以启用高级模式 `sodo`：
+如果你在同一低权限账户下运行**多个 Agent**，希望**只有拿到本次临时令牌的那个 Agent**才能操作提权窗口，可以启用高级模式 `sodo` (*super-oracle do*)（更细致的隔离边界说明见 [docs/design.md](docs/design.md)）：
 
 ### 安装
 
@@ -187,7 +187,7 @@ printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
 
 | 维度 | `direct`（默认） | `sodo`（高级） |
 |---|---|---|
-| **适用场景** | 单 Agent / 同机互信多 Agent | 同 UID 下多 Agent 互不信任 |
+| **适用场景** | 单 Agent / 同机互信多 Agent | 同 UID 下多 Agent 会话令牌准入 |
 | **依赖** | `bash` + `tmux` | `bash` + `tmux` + `sudo` |
 | **额外组件** | 无（原生 `tmux`） | 单文件纯 Shell `/usr/local/bin/nmux` |
 | **系统侵入性** | 零侵入 | 1 条 `/etc/sudoers.d/nas-sodo`（配套 `uninstall.sh`） |
@@ -202,7 +202,7 @@ printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
 
 1. **不做命令审查，靠人眼兜底**：NAS 的核心是“控制谁能跨过边界 + 全程可视化 + 随时拔电源”，不承诺靠命令白名单拦截恶意参数。在 `sodo` 模式下，持有合法令牌的 Agent 被视作已获该会话的完整 tmux 控制权。
 2. **WSL 环境的已知绕过面**：在默认 WSL2 中，`/run/WSL/*_interop` socket 权限为 `0777`，任意低权限用户理论上都能通过 `wsl.exe -u root` 绕过 Linux 账户隔离。`install.sh` 会主动检测该风险并可写入 Agent 软提醒；若需强安全边界，请在 WSL 侧关闭 interop 或加固 `/init`。
-3. **关注孤儿会话**：提权结束后请确认关闭对应的 tmux 会话（随时用 `tmux ls` 或 `nmux ls` 检查）。
+3. **关注孤儿会话（`detach` ≠ 销毁）**：直接关闭终端标签页或 `Ctrl-b d` 只是 detach，会话仍在后台存活；提权结束后请通过 `exit` 或 `nmux kill <session>` 彻底销毁会话（随时用 `tmux ls` 或 `nmux ls` 检查）。
 
 ---
 

@@ -28,8 +28,8 @@ Options:
   --mode <direct|sodo>   Installation mode (default: direct)
   --agent <username>     Low-privilege agent account (default: nas-agent)
   --human <username>     Human account to elevate to (default: current user)
-  --wsl-warning          Add WSL interop warning prompt if vulnerable
-  --skip-wsl-warning     Skip WSL interop warning prompt
+  --wsl-warning          Patch WSL interop warning into /nas-elevate skill if vulnerable
+  --skip-wsl-warning     Skip WSL interop warning in /nas-elevate skill
   -y, --yes              Non-interactive mode (accept defaults)
   -h, --help             Show this help
 EOF
@@ -176,7 +176,7 @@ if grep -qi microsoft /proc/version 2>/dev/null || [ -d /run/WSL ]; then
       if [ "$AUTO_YES" -eq 1 ]; then
         WSL_WARNING_CHOICE="yes"
       else
-        read -r -p "Add a soft warning notice to agent's ~/.claude/prompts/wsl-warning.txt? [Y/n]: " ANS
+        read -r -p "Patch a soft WSL security notice into the /nas-elevate skill? [Y/n]: " ANS
         ANS="${ANS:-Y}"
         if [[ "$ANS" =~ ^[Yy]$ ]]; then
           WSL_WARNING_CHOICE="yes"
@@ -188,9 +188,31 @@ if grep -qi microsoft /proc/version 2>/dev/null || [ -d /run/WSL ]; then
   fi
 fi
 
-# Step 4: Install mode-specific components
+# Step 4: Check existing installation state before making changes
+HAS_SODO_ARTIFACTS=0
+if [ -e /etc/sudoers.d/nas-sodo ] || [ -e /usr/local/bin/nmux ] || [ -e /etc/nas/sodo.conf ]; then
+  HAS_SODO_ARTIFACTS=1
+fi
+
+if [ "$MODE" = "direct" ] && [ "$HAS_SODO_ARTIFACTS" -eq 1 ]; then
+  echo "" >&2
+  echo -e "${RED}Error: existing sodo installation detected (/usr/local/bin/nmux, /etc/nas/sodo.conf, or /etc/sudoers.d/nas-sodo).${NC}" >&2
+  echo "Switching from sodo to direct requires removing the old sodo authorization first so mode and sudoers stay consistent." >&2
+  echo "Please run:" >&2
+  echo "  ./uninstall.sh" >&2
+  echo "  ./install.sh --mode direct --agent $AGENT_USER --human $HUMAN_USER" >&2
+  exit 1
+fi
+
+# Install mode-specific components
 echo ""
-echo -e "${BOLD}Installing ($MODE mode)...${NC}"
+if [ "$MODE" = "sodo" ] && [ "$HAS_SODO_ARTIFACTS" -eq 1 ]; then
+  echo -e "${BOLD}Updating existing sodo installation in place...${NC}"
+elif sudo -u "$AGENT_USER" test -f "$AGENT_HOME/.config/nas/mode"; then
+  echo -e "${BOLD}Updating existing installation ($MODE mode)...${NC}"
+else
+  echo -e "${BOLD}Installing ($MODE mode)...${NC}"
+fi
 
 sudo -u "$AGENT_USER" mkdir -p "$AGENT_HOME/.config/nas"
 printf '%s\n' "$MODE" | sudo -u "$AGENT_USER" tee "$AGENT_HOME/.config/nas/mode" >/dev/null
@@ -204,14 +226,15 @@ if [ "$MODE" = "sodo" ]; then
   # Install single-file root-owned nmux
   sudo install -o root -g root -m 755 "$SCRIPT_DIR/scripts/nmux" /usr/local/bin/nmux
 
-  # Write root-owned config (trust root for nmux)
+  # Atomically write root-owned config (trust root for nmux)
   sudo install -d -o root -g root -m 755 /etc/nas
-  cat <<EOF | sudo tee /etc/nas/sodo.conf >/dev/null
+  CONF_TMP="$(mktemp)"
+  cat <<EOF > "$CONF_TMP"
 HUMAN_USER=$HUMAN_USER
 AGENT_USER=$AGENT_USER
 EOF
-  sudo chown root:root /etc/nas/sodo.conf
-  sudo chmod 644 /etc/nas/sodo.conf
+  sudo install -o root -g root -m 644 "$CONF_TMP" /etc/nas/sodo.conf
+  rm -f "$CONF_TMP"
 
   # Configure sudoers cleanly
   SUDOERS_TMP="$(mktemp)"
@@ -232,10 +255,7 @@ else
   echo -e "${GREEN}✓ Direct mode configured (no extra binaries or sudoers)${NC}"
 fi
 
-# Step 5: Install /nas-elevate skill with rendered MODE_MARKER
-SKILL_DIR="$AGENT_HOME/.claude/skills/nas-elevate"
-sudo -u "$AGENT_USER" mkdir -p "$SKILL_DIR"
-
+# Step 5: Render and install /nas-elevate skill (MODE_MARKER + optional WSL_WARNING)
 RENDERED_BLOCK="$(mktemp)"
 if [ "$MODE" = "direct" ]; then
   cat <<EOF > "$RENDERED_BLOCK"
@@ -275,36 +295,76 @@ else
 EOF
 fi
 
+WSL_BLOCK="$(mktemp)"
+if [ "$WSL_VULNERABLE" -eq 1 ] && [ "$WSL_WARNING_CHOICE" = "yes" ]; then
+  cat <<'EOF' > "$WSL_BLOCK"
+<!-- WSL_WARNING_START -->
+## WSL Security Notice
+
+This WSL environment has `0777` interop sockets (`/run/WSL/*_interop`). Do NOT invoke `wsl.exe`, `cmd.exe`, or `powershell.exe` to bypass OS user isolation. Always use `/nas-elevate` instead.
+<!-- WSL_WARNING_END -->
+EOF
+fi
+
 RENDERED_SKILL="$(mktemp)"
-awk -v blockfile="$RENDERED_BLOCK" '
+awk -v modefile="$RENDERED_BLOCK" -v wslfile="$WSL_BLOCK" '
   /<!-- MODE_MARKER_START -->/ {
-    while ((getline line < blockfile) > 0) print line
-    close(blockfile)
-    skip = 1
+    while ((getline line < modefile) > 0) print line
+    close(modefile)
+    skip_mode = 1
     next
   }
   /<!-- MODE_MARKER_END -->/ {
-    skip = 0
+    skip_mode = 0
     next
   }
-  !skip { print }
+  /<!-- WSL_WARNING_START -->/ {
+    while ((getline line < wslfile) > 0) print line
+    close(wslfile)
+    skip_wsl = 1
+    next
+  }
+  /<!-- WSL_WARNING_END -->/ {
+    skip_wsl = 0
+    next
+  }
+  !skip_mode && !skip_wsl { print }
 ' "$SCRIPT_DIR/skills/nas-elevate/SKILL.md" > "$RENDERED_SKILL"
 
-sudo -u "$AGENT_USER" tee "$SKILL_DIR/SKILL.md" < "$RENDERED_SKILL" >/dev/null
-rm -f "$RENDERED_BLOCK" "$RENDERED_SKILL"
-echo -e "${GREEN}✓ Installed /nas-elevate skill at $SKILL_DIR/SKILL.md${NC}"
+# Install skill via `npx skills` (as AGENT_USER) when npx is available; fall back to direct copy
+SKILL_INSTALLED_VIA_NPX=0
+if sudo -u "$AGENT_USER" -H bash -lc 'command -v npx >/dev/null 2>&1'; then
+  STAGE_DIR="$(sudo -u "$AGENT_USER" mktemp -d)"
+  sudo -u "$AGENT_USER" mkdir -p "$STAGE_DIR/nas-elevate"
+  sudo -u "$AGENT_USER" tee "$STAGE_DIR/nas-elevate/SKILL.md" < "$RENDERED_SKILL" >/dev/null
 
-# Optional WSL prompt warning
-if [ "$WSL_VULNERABLE" -eq 1 ] && [ "$WSL_WARNING_CHOICE" = "yes" ]; then
-  WARN_FILE="$AGENT_HOME/.claude/prompts/wsl-warning.txt"
-  sudo -u "$AGENT_USER" mkdir -p "$(dirname "$WARN_FILE")"
-  cat <<'EOF' | sudo -u "$AGENT_USER" tee "$WARN_FILE" >/dev/null
-WSL Security Notice:
-This WSL environment has 0777 interop sockets. Do NOT invoke wsl.exe, cmd.exe,
-or powershell.exe for privilege escalation. Always use /nas-elevate instead.
-EOF
-  echo -e "${GREEN}✓ Added WSL warning at $WARN_FILE${NC}"
+  NPX_ARGS=(-y skills add "$STAGE_DIR" -g -s nas-elevate)
+  if [ "$AUTO_YES" -eq 1 ] || [ ! -t 0 ]; then
+    NPX_ARGS+=(-a claude-code -y)
+  fi
+
+  echo "Installing /nas-elevate skill via npx skills (as $AGENT_USER)..."
+  if sudo -u "$AGENT_USER" -H bash -lc 'exec npx "$@"' _ "${NPX_ARGS[@]}"; then
+    SKILL_INSTALLED_VIA_NPX=1
+    echo -e "${GREEN}✓ Installed /nas-elevate skill via npx skills${NC}"
+  else
+    echo -e "${YELLOW}⚠ npx skills failed (offline or unavailable); falling back to direct install.${NC}"
+  fi
+  sudo -u "$AGENT_USER" rm -rf -- "$STAGE_DIR"
 fi
+
+if [ "$SKILL_INSTALLED_VIA_NPX" -eq 0 ]; then
+  SKILL_DIR="$AGENT_HOME/.claude/skills/nas-elevate"
+  sudo -u "$AGENT_USER" mkdir -p "$SKILL_DIR"
+  sudo -u "$AGENT_USER" tee "$SKILL_DIR/SKILL.md" < "$RENDERED_SKILL" >/dev/null
+  echo -e "${GREEN}✓ Installed /nas-elevate skill at $SKILL_DIR/SKILL.md${NC}"
+fi
+
+if [ "$WSL_VULNERABLE" -eq 1 ] && [ "$WSL_WARNING_CHOICE" = "yes" ]; then
+  echo -e "${GREEN}✓ Patched WSL security notice into /nas-elevate skill${NC}"
+fi
+
+rm -f "$RENDERED_BLOCK" "$WSL_BLOCK" "$RENDERED_SKILL"
 
 echo ""
 echo -e "${BOLD}${GREEN}✓ Installation Complete ($MODE mode)${NC}"

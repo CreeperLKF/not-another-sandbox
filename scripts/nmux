@@ -126,7 +126,11 @@ human_create() {
   local token
   token="$(generate_token)"
   tmux -L "$socket" new-session -d -s "$session"
-  tmux -L "$socket" set-option -g @nmux_token "$token"
+  # Pass token via stdin (printf is a bash builtin) so it never appears in /proc/<pid>/cmdline
+  if ! printf 'set-option -g @nmux_token %s\n' "$token" | tmux -L "$socket" source-file -; then
+    tmux -L "$socket" kill-server 2>/dev/null || true
+    die "failed to store token in tmux session '$session'"
+  fi
 
   echo "Session: $session"
   echo "Token:   $token"

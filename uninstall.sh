@@ -41,7 +41,7 @@ echo "  - Sudoers rule (/etc/sudoers.d/nas-sodo)"
 echo "  - System script (/usr/local/bin/nmux)"
 echo "  - System config (/etc/nas/)"
 if [ -n "$AGENT_USER" ]; then
-  echo "  - Agent config & skill (~$AGENT_USER/.config/nas, ~$AGENT_USER/.claude/skills/nas-elevate)"
+  echo "  - Agent config & /nas-elevate skill (as $AGENT_USER)"
 fi
 echo "  - Active nmux-* tmux sessions (if any)"
 echo ""
@@ -69,7 +69,7 @@ cleanup_user_sockets() {
       rm -f "$sock" 2>/dev/null || true
     else
       sudo -u "$target_user" tmux -L "$base" kill-server 2>/dev/null || true
-      sudo rm -f "$sock" 2>/dev/null || true
+      sudo -u "$target_user" rm -f -- "$sock" 2>/dev/null || true
     fi
   done
   shopt -u nullglob
@@ -80,41 +80,42 @@ if [ -n "$HUMAN_USER" ] && [ "$HUMAN_USER" != "$(id -un)" ]; then
   cleanup_user_sockets "$HUMAN_USER"
 fi
 
-# 2. Remove sudoers entry
+# 2. Remove root-owned system files installed by sodo mode
 if [ -f /etc/sudoers.d/nas-sodo ]; then
   echo "Removing /etc/sudoers.d/nas-sodo"
   sudo rm -f /etc/sudoers.d/nas-sodo
 fi
 
-# 3. Remove /usr/local/bin/nmux (and legacy nmux-verify / nmuxd if any)
-for bin in /usr/local/bin/nmux /usr/local/bin/nmux-verify /usr/local/bin/nmuxd; do
-  if [ -f "$bin" ]; then
-    echo "Removing $bin"
-    sudo rm -f "$bin"
-  fi
-done
+if [ -f /usr/local/bin/nmux ]; then
+  echo "Removing /usr/local/bin/nmux"
+  sudo rm -f /usr/local/bin/nmux
+fi
 
-# 4. Remove /etc/nas
 if [ -d /etc/nas ]; then
   echo "Removing /etc/nas"
   sudo rm -rf /etc/nas
 fi
 
-# 5. Remove agent configs and skill
+# 3. Remove agent-side configs and skill (strictly as AGENT_USER, never as root)
 if [ -n "$AGENT_USER" ] && id "$AGENT_USER" >/dev/null 2>&1; then
+  if sudo -u "$AGENT_USER" -H bash -lc 'command -v npx >/dev/null 2>&1'; then
+    echo "Removing /nas-elevate skill via npx skills (as $AGENT_USER)..."
+    sudo -u "$AGENT_USER" -H bash -lc 'npx -y skills remove nas-elevate -g -y' >/dev/null 2>&1 || true
+  fi
+
   AGENT_HOME="$(getent passwd "$AGENT_USER" | cut -d: -f6)"
   if [ -n "$AGENT_HOME" ]; then
-    for target in "$AGENT_HOME/.config/nas" "$AGENT_HOME/.claude/skills/nas-elevate" "$AGENT_HOME/.claude/prompts/wsl-warning.txt"; do
-      if [ -e "$target" ]; then
-        echo "Removing $target"
-        sudo rm -rf "$target"
+    for target in \
+      "$AGENT_HOME/.config/nas" \
+      "$AGENT_HOME/.claude/skills/nas-elevate" \
+      "$AGENT_HOME/.agents/skills/nas-elevate"; do
+      if sudo -u "$AGENT_USER" test -e "$target" || sudo -u "$AGENT_USER" test -L "$target"; then
+        echo "Removing $target (as $AGENT_USER)"
+        sudo -u "$AGENT_USER" rm -rf -- "$target"
       fi
     done
   fi
 fi
-
-# 6. Clean up legacy /dev/shm/nmux-* if any exist from older versions
-sudo rm -f /dev/shm/nmux-* 2>/dev/null || true
 
 echo ""
 echo "=== Uninstall Complete ==="

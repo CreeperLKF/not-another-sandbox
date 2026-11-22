@@ -30,7 +30,7 @@ You are helping a human (running in their normal account) install **not-another-
 
 ### 2. Check Environment
 - Verify `tmux` is installed (`tmux -V`).
-- If on WSL (`/run/WSL/*_interop` with mode `777`), warn the user that any local user can escape isolation via `wsl.exe -u root`, and let them choose whether to add the soft prompt warning (`~/.claude/prompts/wsl-warning.txt`).
+- If on WSL (`/run/WSL/*_interop` with mode `777`), warn the user that any local user can escape isolation via `wsl.exe -u root`, and let them choose whether to patch the soft WSL security notice into the `/nas-elevate` skill.
 
 ### 3. Run the Installer
 Have the human run `./install.sh` (or run it inside a supervised tmux session as a live tutorial):

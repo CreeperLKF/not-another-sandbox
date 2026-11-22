@@ -91,7 +91,7 @@ Human 结束监督:
 Human (在 human 账户):
   $ nmux create work
     -> 启动独立 tmux server: tmux -L nmux-work new-session -d -s work
-    -> 生成随机 UUID，仅写入该 server 内存选项: @nmux_token
+    -> 生成随机 UUID，经 stdin (`tmux source-file -`) 写入该 server 内存选项 @nmux_token（不进入 argv）
     -> 打印 Token，人类复制给指定 Agent 后按 Enter attach 盯屏
 
 Agent (在 agent 账户):
@@ -121,18 +121,21 @@ Human 结束监督:
    - `nmux` 只要检测到 `SUDO_USER` 非空，强制进入 Agent 验权路径，杜绝通过 sudo 触发人类管理子命令（`create`/`kill` 等）。
 
 2. **杜绝命令行参数泄漏凭据**
-   - 同 UID 进程可读取 `/proc/<pid>/cmdline` 与 `/proc/<pid>/environ`。
-   - `nmux` 强制要求从 **stdin** 读取 token，并在调用 `sudo` 时使用 `-n`（非交互模式），防止误将 token 当作密码吞掉。
+   - 同 UID（以及 Linux 默认 `hidepid=0` 下的其他本地用户）进程可读取 `/proc/<pid>/cmdline`。
+   - 创建端通过 bash 内置 `printf` 经 stdin 管道（`tmux -L "$socket" source-file -`）写入 `@nmux_token`，调用端强制要求从 **stdin** 读取 token 并以 `sudo -n`（非交互模式）透传，确保 token 在全生命周期中都不进入任何子进程的 `argv`。
 
 3. **会话名注入与跨会话逃逸防护**
    - `<session>` 严格校验匹配 `^[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}$`，杜绝 `../` 路径穿越（防止指向 Agent 伪造的 tmux server 绕过鉴权）及 tmux target 分隔符注入。
    - 透传给 `tmux` 的首个参数严格校验匹配 `^[a-z][a-z0-9-]*$`，彻底禁止 `-L`、`-S`、`-f` 等全局参数覆盖独立 socket 或加载任意配置文件（防止逃逸到人类默认 tmux 或读取敏感文件），同时保持对全部 tmux 子命令的无白名单透传。
 
 4. **凭据与会话同生共死**
-   - 不使用 `/dev/shm` 或磁盘文件落盘 token；令牌仅存活于对应独立 tmux server 内存中。无单独 `revoke` 命令，关闭 tmux 即彻底撤权。
+   - 不使用 `/dev/shm` 或磁盘文件落盘 token；令牌仅存活于对应独立 tmux server 内存中。无单独 `revoke` 命令，销毁 tmux server 即彻底失效。
 
 5. **设计边界说明**
-   - 按照“准入即全权（无白名单）”原则，一旦 Agent 持有有效令牌，即可向对应 `nmux-<session>` 发送任意 tmux 子命令（注：包含 `run-shell` 等非屏幕输出子命令，权限等价于已授权的 `human` 会话）；系统防线核心在于“未授权绝不可跨边界 + 跨会话严格隔离 + 人类值守与即时销毁”。
+   - **准入即全权（无白名单）**：一旦 Agent 持有有效令牌，即可向对应 `nmux-<session>` 发送任意 tmux 子命令（注：包含 `run-shell` 等非屏幕输出子命令，权限等价于已授权的 `human` 会话）；系统防线核心在于“未授权绝不可跨边界 + 跨会话隔离 + 人类值守与即时销毁”。
+   - **同 UID 多 Agent 隔离边界（过渡方案定位）**：`sodo` 是同 UID 多 Agent 场景下的**会话级令牌准入（过渡安全方案）**，用于防止未持有当前令牌的其他 Agent 直接复用共享 tmux socket 或误操作提权会话。但由于共享同一 Linux UID 的进程在 OS 层面共享家目录（含对话记录、配置、Shell 环境等），令牌交付与保管仍依赖外部运行环境。若需要强对抗意义上的多 Agent 隔离，应为互不信任的 Agent 分配**独立 OS 账户**（回归 OS 原生 UID 边界）。
+   - **撤权语义（`detach` vs `exit` / `nmux kill`）**：断开终端窗口或 `Ctrl-b d` 仅会 `detach` 客户端，独立 tmux server 与令牌依然存活；只有退出会话内全部 shell（`exit`）或执行 `nmux kill <session>` 销毁 server，旧令牌才会彻底失效、无法再通过该入口发起操作。遵循“授权之后与用户同等权力”原则，销毁 server 不会回滚已完成的文件修改或已脱离会话运行的后台任务。
+   - **安装与卸载权限边界**：`install.sh` 支持同模式原地重装/升级（覆写二进制、配置与 Skill），从 `sodo` 切回 `direct` 时会检测旧的 `sudoers`/`nmux` 残留并要求先运行 `./uninstall.sh`，避免配置与实际授权分叉；Skill 安装/卸载在 Agent 账户具备 `npx` 时优先以 `AGENT_USER` 调用 `npx skills` 适配多 Agent，无 `npx` 或离线失败时自动回退至 `~/.claude/skills/nas-elevate`；`uninstall.sh` 仅以 root 清理系统级安装文件，Agent 家目录内的配置与 Skill 均以 `AGENT_USER` 自身权限清理。
 
 ---
 
@@ -140,7 +143,7 @@ Human 结束监督:
 
 在 WSL 环境中，`/run/WSL/*_interop` socket 默认权限为 `0777`，任何低权限用户均可通过 `binfmt_misc` 调用 Windows 侧 `wsl.exe -u root` 绕过 OS 隔离。
 
-- `install.sh` 会自动检测该风险，并可选择向 Agent 写入软提醒（`~/.claude/prompts/wsl-warning.txt`）。
+- `install.sh` 会自动检测该风险，并可选择将软提醒直接 patch 进 `/nas-elevate` Skill 中。
 - 彻底封堵需在 WSL 层限制互操作（如禁用 interop 或修补 `/init` 的 socket 权限）。
 
 ---

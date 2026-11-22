@@ -28,3 +28,6 @@ Check `~/.config/nas/mode` (`direct` or `sodo`) and `~/.config/nas/config`.
    - In `sodo` mode, **always pass the token via stdin** (`printf '%s\n' "$TOKEN" | nmux <session> ...`). Never put the token in command-line arguments or shared files.
    - `nmux <session> <tmux-subcommand> ...` forwards standard tmux subcommands directly to that isolated session (global flags like `-L`/`-S`/`-f` are blocked by design).
 4. **Confirm done**: Once finished, tell the human they can close the tmux session (`exit` or `kill-session` / `nmux kill <session>`).
+
+<!-- WSL_WARNING_START -->
+<!-- WSL_WARNING_END -->
