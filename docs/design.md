@@ -156,8 +156,12 @@ NAS 在 `install.sh` 中提供统一的 `--harden-wsl` 可选开关（兼容 `di
 - **挂载层收紧 `/mnt/*`（`umask=077`）**：
   - 在 `/etc/wsl.conf` 的 `[automount]` 段写入 `options = "uid=<human_uid>,gid=<human_gid>,umask=077"`（若用户已有自定义 `options` 则保留原配置并给出提示，绝不强行覆盖）。
   - 重启一次 WSL 实例生效后，所有 Windows 盘变为 `0700`：人类与 `root`（依托 `9p` `access=client` 与 `CAP_DAC_OVERRIDE`）正常访问，`agent` 既无法读写宿主机文件，也无法触及 `/mnt/c/.../wsl.exe` 二进制本身（需将协作代码库放在 Linux 原生文件系统中）。
-- **坦诚边界（Best-Effort 定位）**：
-  - 运行时 socket 收紧属于 **best-effort** 机制：当宿主机从 Windows 侧新拉起 `wsl.exe` 会话时，新 socket 在 systemd 完成 `chmod` 前存在数十毫秒级的创建窗口（日常在已启动的 VSCode 或 `tmux` 内开窗不会产生新 socket）。
+- **坦诚边界（Best-Effort 定位与竞态利用条件）**：
+  - 运行时 socket 收紧属于 **best-effort** 机制：当宿主机从 Windows 侧新拉起 `wsl.exe` 会话时，新建的 `<pid>_interop` 在 systemd 完成 `chgrp/chmod` 前存在数十毫秒级的创建窗口（TOCTOU）。在实战中要利用该窗口，必须**同时满足**以下三个前置条件：
+    1. **后台驻留与高频轮询**：`agent` 进程已在运行，且预先以毫秒级死循环持续轮询 `/run/WSL` 目录（常规“先启动 WSL 与首个终端 / VSCode，再切入 `nas-agent` 启动 Agent”的时序下，存量 socket 早已收紧为 `0770`，不存在竞态）；
+    2. **外部新起宿主机 `wsl.exe` 会话**：轮询期间恰好有新的 `wsl.exe` 会话从 Windows 侧发起（注：在已连接的 VSCode 内新建集成终端标签页，或在 Linux 内执行 `tmux new` / `nmux create`，均直接在 Linux 内 fork 进程，**不会创建新的 interop socket，也不会触发该窗口**）；
+    3. **可用载荷**：若已按 `--harden-wsl` 重启使 `/mnt/*` 的 `umask=077` 生效，`agent` 已无法访问或执行 `/mnt/c/.../wsl.exe` 等宿主机程序，攻击者还必须在几十毫秒窗口内通过原生 `AF_UNIX` 自行完成未公开的 WSL 互操作二进制协议握手。
+  - **测试覆盖说明**：仓库自带的自动化测试（`tests/test-wsl-harden.sh`）及测试文档仅覆盖稳态下的权限隔离、高频启动不熔断与安装卸载回滚验证，**不覆盖上述毫秒级竞争窗口（race window）的抢跑测试**。
   - 若开启了 WSLg 图形支持，`/mnt/wslg` 下的 X11/Wayland socket 仍对本地图形程序共享（如需关闭可在宿主机 `.wslconfig` 设 `guiApplications=false`）；若需彻底物理切断互操作，可在 `/etc/wsl.conf` 中配置 `[interop] enabled=false`。
   - 若用户未启用 `--harden-wsl`，`install.sh` 仍支持向 `/nas-elevate` Skill 注入软安全提醒（`--wsl-warning`）。
 

@@ -106,6 +106,8 @@ sudo -u nas-agent -i
 
 ## 使用方法
 
+> 不熟悉 Linux 多账户或 `tmux` 基本操作？先看一眼 [速查手册 (docs/cheatsheet.md)](docs/cheatsheet.md)。
+
 ### 日常操作
 
 Agent 保持在 `nas-agent` 账号。写代码、跑测试等不需要提权。

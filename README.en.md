@@ -106,6 +106,8 @@ In `sodo` mode, the token lives solely in the isolated tmux server's memory and 
 
 ## Usage
 
+> New to Linux multi-user accounts or `tmux`? Check the [Quick Reference (docs/cheatsheet.en.md)](docs/cheatsheet.en.md) first.
+
 ### Day-to-Day Operation
 
 Keep the agent inside `nas-agent`. Writing code, running tests, and routine development need no elevation.

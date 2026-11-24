@@ -612,8 +612,11 @@ if [ "$WSL_RESTART_NEEDED" -eq 1 ]; then
   echo ""
   echo -e "${YELLOW}WSL Note:${NC} Restart this WSL distro once from Windows (e.g., wsl.exe --terminate \${WSL_DISTRO_NAME:-<Distro>})"
   echo "  so /mnt/* umask=077 takes effect. Keep shared agent project directories on the Linux filesystem (not /mnt/c)."
+elif [ "$IS_WSL" -eq 1 ] && [ "$HARDEN_WSL_CHOICE" != "yes" ] && { [ "$WSL_INTEROP_EXPOSED" -eq 1 ] || [ "$WSL_DRVFS_EXPOSED" -eq 1 ]; }; then
+  echo ""
+  echo -e "${YELLOW}⚠ WSL Recommendation:${NC} WSL interop sockets or /mnt/* drives remain accessible to '$AGENT_USER'."
+  echo "  Recommended: ./install.sh --mode $MODE --agent $AGENT_USER --human $HUMAN_USER --harden-wsl"
 fi
-echo ""
 echo ""
 echo -e "${BOLD}Next steps:${NC}"
 echo "  1. Start your agent:"

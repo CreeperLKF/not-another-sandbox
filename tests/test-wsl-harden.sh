@@ -1,6 +1,11 @@
 #!/bin/bash
 # End-to-end test suite for not-another-sandbox WSL hardening (--harden-wsl)
 #
+# Scope: Verifies steady-state permission isolation (0770 interop sockets + 0700 /mnt/* mounts),
+# systemd rapid-burst resilience, human/root interop retention, and clean uninstall rollback.
+# Note: Does NOT test the transient millisecond-level TOCTOU race window on new host wsl.exe startup
+# (documented under Section 5 of docs/design.md).
+#
 # Orchestrates testing from a WSL/Windows host against a disposable target WSL2 distro
 # (restarts the target distro during testing and restores its original /etc/wsl.conf on exit).
 #
@@ -161,6 +166,7 @@ cd "$STAGE_DIR"
 EOF
 )"
 echo "$OUT1" | grep -q "WSL Isolation Warning" && check "Detects WSL interop & drvfs exposure" 1 || check "Detects WSL interop & drvfs exposure" 0
+(echo "$OUT1" | grep -q "WSL Recommendation:" && echo "$OUT1" | grep -q "Recommended:.*--harden-wsl") && check "Non-interactive -y prints end-of-install --harden-wsl recommendation" 1 || check "Non-interactive -y prints end-of-install --harden-wsl recommendation" 0
 
 T1="$(wsl_root <<EOF
 [ ! -e /etc/systemd/system/nas-wsl-interop.path ] && echo NO_UNIT=1 || echo NO_UNIT=0
