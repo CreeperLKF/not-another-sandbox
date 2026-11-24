@@ -238,9 +238,12 @@ not-another-sandbox/
 ├── skills/
 │   ├── nas-setup-guide/SKILL.md     # Setup guide skill (for human-side agent)
 │   └── nas-elevate/SKILL.md         # Runtime elevation skill (installed into agent account)
-└── docs/
-    ├── design.md                    # Architecture & security invariants (Chinese)
-    └── design.en.md                 # Architecture & security invariants (English)
+├── docs/
+│   ├── design.md                    # Architecture & security invariants (Chinese)
+│   └── design.en.md                 # Architecture & security invariants (English)
+└── tests/
+    ├── test-nas.sh                  # End-to-end regression suite (direct & sodo)
+    └── test-wsl-harden.sh           # End-to-end WSL2 --harden-wsl suite
 ```
 
 ## Further Reading

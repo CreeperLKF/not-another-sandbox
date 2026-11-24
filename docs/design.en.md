@@ -170,13 +170,16 @@ not-another-sandbox/
 ├── README.md                        # Quick start (Chinese)
 ├── README.en.md                     # Quick start (English)
 ├── install.sh                       # Interactive / non-interactive installer
-├── uninstall.sh                     # Clean removal of sudoers, nmux, configs, and skill
+├── uninstall.sh                     # Clean removal of sudoers, nmux, WSL hardening, configs, and skill
 ├── scripts/
 │   └── nmux                         # Single-file pure shell entrypoint for sodo mode
 ├── skills/
 │   ├── nas-setup-guide/SKILL.md     # Setup guide skill (referenced by README, not installed)
 │   └── nas-elevate/SKILL.md         # Runtime elevation skill (rendered per mode during install)
-└── docs/
-    ├── design.md                    # Architecture & security invariants (Chinese)
-    └── design.en.md                 # This document (English)
+├── docs/
+│   ├── design.md                    # Architecture & security invariants (Chinese)
+│   └── design.en.md                 # This document (English)
+└── tests/
+    ├── test-nas.sh                  # End-to-end regression suite (direct & sodo)
+    └── test-wsl-harden.sh           # End-to-end WSL2 --harden-wsl suite
 ```

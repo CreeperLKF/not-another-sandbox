@@ -170,13 +170,16 @@ not-another-sandbox/
 ├── README.md                        # 快速开始（中文）
 ├── README.en.md                     # 快速开始（英文）
 ├── install.sh                       # 交互/非交互安装脚本
-├── uninstall.sh                     # 清理 sudoers、nmux、配置与 skill
+├── uninstall.sh                     # 清理 sudoers、nmux、WSL 加固、配置与 skill
 ├── scripts/
 │   └── nmux                         # sodo 模式单文件纯 Shell 入口
 ├── skills/
 │   ├── nas-setup-guide/SKILL.md     # 安装引导 Skill（README 引用，不安装）
 │   └── nas-elevate/SKILL.md         # 运行时提权 Skill（安装时按模式渲染）
-└── docs/
-    ├── design.md                    # 本文档（中文）
-    └── design.en.md                 # 设计文档（英文）
+├── docs/
+│   ├── design.md                    # 本文档（中文）
+│   └── design.en.md                 # 设计文档（英文）
+└── tests/
+    ├── test-nas.sh                  # direct / sodo 端到端回归测试
+    └── test-wsl-harden.sh           # WSL2 --harden-wsl 端到端测试
 ```

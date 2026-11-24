@@ -225,7 +225,7 @@ printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
 
 ## 项目结构
 
-整个仓库只有 7 个核心文件，打开就能读完：
+核心代码保持极简，打开就能读完：
 
 ```text
 not-another-sandbox/
@@ -238,9 +238,12 @@ not-another-sandbox/
 ├── skills/
 │   ├── nas-setup-guide/SKILL.md     # 安装引导 Skill（供人类侧 Agent 读取）
 │   └── nas-elevate/SKILL.md         # 运行时提权 Skill（安装到 Agent 账户）
-└── docs/
-    ├── design.md                    # 完整架构设计与安全不变量（中文）
-    └── design.en.md                 # 完整架构设计与安全不变量（英文）
+├── docs/
+│   ├── design.md                    # 完整架构设计与安全不变量（中文）
+│   └── design.en.md                 # 完整架构设计与安全不变量（英文）
+└── tests/
+    ├── test-nas.sh                  # direct / sodo 端到端回归测试脚本
+    └── test-wsl-harden.sh           # WSL2 --harden-wsl 端到端测试脚本
 ```
 
 ## 延伸阅读
