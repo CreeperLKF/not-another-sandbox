@@ -57,7 +57,7 @@ cd not-another-sandbox
 
 `install.sh` defaults to `direct` mode and guides you through three steps:
 1. Create or select a low-privilege agent account (default: `nas-agent`);
-2. Detect WSL interop privilege-escalation risks (if running under WSL);
+2. Detect WSL interop and Windows drive exposure risks (if running under WSL, with optional one-flag `--harden-wsl` lockdown);
 3. Render and install the `/nas-elevate` runtime skill into the agent account (automatically using `npx skills` when available, with direct fallback).
 
 ### Option B: Let Your Current Agent Walk You Through Setup
@@ -203,14 +203,23 @@ printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p | tail -80
 We prefer putting assumptions and limits in plain sight:
 
 1. **No command filtering — human eyes are the backstop**: NAS controls *who* crosses the boundary, keeps execution visible, and gives you an instant kill switch. It does not promise to block malicious flags via allowlists. In `sodo` mode, an agent holding a valid token has full tmux control over that session.
-2. **Known WSL bypass surface**: Under default WSL2, `/run/WSL/*_interop` sockets are `0777`, allowing any local user to bypass Linux account isolation via `wsl.exe -u root`. `install.sh` detects this and can patch a soft notice into `/nas-elevate`; for a hard boundary, disable WSL interop or harden `/init`.
+2. **Known WSL bypass surface & optional `--harden-wsl`**: Under default WSL2, `/run/WSL/*_interop` sockets are `0777` (allowing any local user to escalate via `wsl.exe -u root`) and `/mnt/c` `drvfs` mounts are world-accessible. Run `./install.sh --harden-wsl` to lock down both while keeping Windows interop and VSCode Remote-WSL working for your human account (see below and [docs/design.en.md](docs/design.en.md)); for a hard air-gap against Windows, set `[interop] enabled=false` in `/etc/wsl.conf`.
 3. **Watch out for orphan sessions (`detach` ≠ destroy)**: Closing a terminal tab or pressing `Ctrl+b d` only *detaches* the client — the session stays alive in the background. Always end sessions via `exit` or `nmux kill <session>` (and check with `tmux ls` / `nmux ls`).
 
 ---
 
-## In Development
+## Optional WSL Hardening (`--harden-wsl`)
 
-- **WSL Interop Patch**: An out-of-the-box hardening patch for the default WSL2 `0777` `/run/WSL/*_interop` socket bypass, blocking low-privilege agent escape paths while keeping Windows interop usable for the human account.
+When running NAS inside WSL2 (in either `direct` or `sodo` mode), pass `--harden-wsl` to close default WSL cross-boundary exposures **without breaking Windows interop or VSCode Remote-WSL for your human account**:
+
+```bash
+./install.sh --harden-wsl
+```
+
+This applies two reversible protections (both cleanly removed by `./uninstall.sh`):
+1. **Runtime interop socket lockdown (immediate)**: Installs `nas-wsl-interop.{path,service}` to tighten `/run/WSL/*_interop` sockets to `0770` (`root:<human_group>`) on boot and whenever a new host `wsl.exe` session opens — zero overhead during normal Linux→Windows interop calls (*best-effort runtime hardening; a brief millisecond window exists at new host `wsl.exe` session creation*).
+2. **Windows drive mount lockdown (takes effect after one WSL restart)**: Configures `[automount] options = "uid=<human_uid>,gid=<human_gid>,umask=077"` in `/etc/wsl.conf`, restricting `/mnt/c`, `/mnt/d`, etc. to your human account and `root` so `nas-agent` cannot read host files or execute `/mnt/c/.../wsl.exe`.
+   - **Note**: Restart the WSL distro once from Windows (`wsl.exe --terminate <Distro>`) for `umask=077` to take effect, and keep shared agent project directories on the Linux filesystem (not under `/mnt/c`).
 
 ---
 

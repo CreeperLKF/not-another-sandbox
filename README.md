@@ -57,7 +57,7 @@ cd not-another-sandbox
 
 `install.sh` 默认选择 `direct` 模式，引导你完成三件事：
 1. 创建或指定低权限 Agent 账户（默认 `nas-agent`）；
-2. 检测 WSL 互操作提权风险（如运行在 WSL 下）；
+2. 检测 WSL 互操作与 Windows 盘符暴露风险（如运行在 WSL 下，可选通过 `--harden-wsl` 一键收紧）；
 3. 自动向 Agent 账户渲染并安装运行时技能 `/nas-elevate`。
 
 ### 方式 B：让你当前的 Agent 引导你安装
@@ -203,14 +203,23 @@ printf '%s\n' "$TOKEN" | nmux work capture-pane -t work -p
 我们更愿意把假设和边界摆在明面上：
 
 1. **不做命令审查，靠人眼兜底**：NAS 的核心是“控制谁能跨过边界 + 全程可视化 + 随时拔电源”，不承诺靠命令白名单拦截恶意参数。在 `sodo` 模式下，持有合法令牌的 Agent 被视作已获该会话的完整 tmux 控制权。
-2. **WSL 环境的已知绕过面**：在默认 WSL2 中，`/run/WSL/*_interop` socket 权限为 `0777`，任意低权限用户理论上都能通过 `wsl.exe -u root` 绕过 Linux 账户隔离。`install.sh` 会主动检测该风险并可写入 Agent 软提醒；若需强安全边界，请在 WSL 侧关闭 interop 或加固 `/init`。
+2. **WSL 环境的已知绕过面与 `--harden-wsl` 可选加固**：在默认 WSL2 中，`/run/WSL/*_interop` socket 权限为 `0777`（低权限用户可通过 `wsl.exe -u root` 跨账户提权），且 `/mnt/c` 等 `drvfs` 盘符默认对所有本地用户开放读写。运行 `./install.sh --harden-wsl` 可一键部署双层加固（保留人类侧与 VSCode 互操作体验，详见下节与 [docs/design.md](docs/design.md)）；若需绝对物理隔绝，可在 `/etc/wsl.conf` 中设置 `[interop] enabled=false`。
 3. **关注孤儿会话（`detach` ≠ 销毁）**：直接关闭终端标签页或 `Ctrl-b d` 只是 detach，会话仍在后台存活；提权结束后请通过 `exit` 或 `nmux kill <session>` 彻底销毁会话（随时用 `tmux ls` 或 `nmux ls` 检查）。
 
 ---
 
-## 正在开发
+## WSL 环境可选加固（`--harden-wsl`）
 
-- **WSL Interop 安全补丁**：针对默认 WSL2 中 `/run/WSL/*_interop` 权限为 `0777` 导致的跨账户提权绕过面，提供开箱即用的加固补丁方案，在保留人类侧 WSL 互操作体验的同时封堵低权限 Agent 的逃逸路径。
+如果你在 WSL2 中使用 NAS（无论 `direct` 还是 `sodo` 模式），可以显式传入 `--harden-wsl` 收紧默认跨边界暴露面，同时**不影响人类账户日常调用 Windows 程序或使用 VSCode Remote-WSL**：
+
+```bash
+./install.sh --harden-wsl
+```
+
+该选项完成两件事（均可由 `./uninstall.sh` 完整回滚）：
+1. **运行时收紧互操作 Socket（立即生效）**：安装 `nas-wsl-interop.{path,service}`，在开机及新开 WSL 会话时自动将 `/run/WSL/*_interop` 权限收紧为 `0770`（`root:<human_group>`），阻断 `nas-agent` 连接互操作 socket，日常 Linux→Windows 互操作零额外开销（注：定位为 best-effort 运行时加固，新开宿主机 `wsl.exe` 会话瞬间存在毫秒级窗口）。
+2. **收紧 Windows 盘符挂载权限（重启一次 WSL 后生效）**：在 `/etc/wsl.conf` 配置 `[automount] options = "uid=<human_uid>,gid=<human_gid>,umask=077"`，使 `/mnt/c`、`/mnt/d` 等盘符仅对人类与 `root` 可访问，阻断 `nas-agent` 读写宿主机文件或直接执行 `/mnt/c/.../wsl.exe`。
+   - **提示**：启用后请在宿主机执行一次 `wsl.exe --terminate <Distro>` 使盘符挂载参数生效，并将需要给 Agent 协作的项目目录放在 Linux 原生文件系统中（不要放在 `/mnt/c` 下）。
 
 ---
 

@@ -30,7 +30,9 @@ You are helping a human (running in their normal account) install **not-another-
 
 ### 2. Check Environment
 - Verify `tmux` is installed (`tmux -V`).
-- If on WSL (`/run/WSL/*_interop` with mode `777`), warn the user that any local user can escape isolation via `wsl.exe -u root`, and let them choose whether to patch the soft WSL security notice into the `/nas-elevate` skill.
+- If on WSL (`grep -qi microsoft /proc/version` or `/run/WSL`), check whether `/run/WSL/*_interop` sockets (`0777`) or Windows drives (`/mnt/c`) are exposed to other local users:
+  - Explain that NAS offers optional `--harden-wsl` (reversible via `./uninstall.sh`), which tightens `/run/WSL/*_interop` sockets to `0770` via systemd and sets `[automount] umask=077` in `/etc/wsl.conf` — blocking agent escape and host drive access while keeping Windows interop and VSCode Remote-WSL working for the human account (note: `/mnt/*` changes require one `wsl.exe --terminate <Distro>` restart, and shared agent project directories must live on the Linux filesystem rather than `/mnt/c`; runtime socket hardening is best-effort).
+  - If the user prefers zero system/WSL config changes, they can skip `--harden-wsl` and optionally patch the soft WSL security notice into `/nas-elevate`.
 
 ### 3. Run the Installer
 Have the human run `./install.sh` (or run it inside a supervised tmux session as a live tutorial):
@@ -39,13 +41,15 @@ Have the human run `./install.sh` (or run it inside a supervised tmux session as
 # Default (direct mode)
 ./install.sh
 
-# Advanced (sodo mode)
-./install.sh --mode sodo
+# Direct or sodo mode with optional WSL hardening
+./install.sh --harden-wsl
+./install.sh --mode sodo --harden-wsl
 ```
 
 Non-interactive flags are also supported:
 ```bash
 ./install.sh --mode direct --agent nas-agent --human "$USER" --yes
+./install.sh --mode direct --agent nas-agent --human "$USER" --harden-wsl --yes
 ./install.sh --mode sodo   --agent nas-agent --human "$USER" --yes
 ```
 

@@ -141,12 +141,25 @@ Human finishes supervising:
 
 ---
 
-## 5. WSL Interop Hardening (Optional)
+## 5. WSL Hardening (`--harden-wsl`, Optional)
 
-In default WSL environments, `/run/WSL/*_interop` sockets have mode `0777`, allowing any low-privilege Linux user to invoke Windows-side `wsl.exe -u root` via `binfmt_misc` and bypass OS user isolation.
+Default WSL2 ships with two cross-boundary exposures that bypass native Linux multi-user isolation:
+1. **World-writable interop sockets**: `/run/WSL/*_interop` sockets are created by `/init` as `root:root` with mode `0777`. Even without `$WSL_INTEROP` in its environment, any unprivileged Linux user can enumerate `/run/WSL/*_interop` and invoke Windows-side `wsl.exe -u root`.
+2. **World-accessible Windows drives**: `/mnt/c`, `/mnt/d`, and other `drvfs` (`9p`) mounts default to mode `0777` without a `umask`, letting low-privilege users read/write host user profiles (`/mnt/c/Users/<user>`) or execute Windows binaries directly.
 
-- `install.sh` detects this condition automatically and offers to patch a soft security notice directly into the `/nas-elevate` skill.
-- Hard remediation requires restricting interop at the WSL layer (disabling interop or hardening `/init` socket permissions).
+NAS provides an opt-in `--harden-wsl` flag in `install.sh` (compatible with both `direct` and `sodo` modes, and cleanly reversible via `uninstall.sh`):
+
+- **Runtime `/run/WSL/*_interop` lockdown (`0770 root:<group>`)**:
+  - Installs `nas-wsl-interop.path` (`PathChanged=/run/WSL`) and `nas-wsl-interop.service` (triggered at `multi-user.target` boot and on `/run/WSL` changes, both with `StartLimitIntervalSec=0` so rapid session bursts never trip systemd start-limit throttling).
+  - Rather than running a naive `chmod o=` (which locks out the human user as well because `/init` owns all `*_interop` sockets as `root:root`), NAS sets the socket group to the human's exclusive primary group (or a dedicated `nas-interop` system group if the primary group is shared) with mode `0770`.
+  - Effect: Human terminals, `root`, and VSCode Remote-WSL retain full Windows interop with zero runtime overhead during Linux→Windows `.exe` calls (`connect()` does not modify `/run/WSL`), while the unprivileged `agent` receives kernel `EACCES` on every interop socket.
+- **Mount-level `/mnt/*` lockdown (`umask=077`)**:
+  - Configures `[automount] options = "uid=<human_uid>,gid=<human_gid>,umask=077"` in `/etc/wsl.conf` (preserving any pre-existing custom `options` with a warning rather than overwriting).
+  - Once the WSL distro restarts, Windows drives mount as `0700`: both the human user and `root` (via `9p` `access=client` + `CAP_DAC_OVERRIDE`) retain full access, while the `agent` cannot read/write Windows files or execute `/mnt/c/.../wsl.exe` (shared agent workspaces must live on the Linux filesystem).
+- **Explicit Boundaries (Best-Effort Scope)**:
+  - Runtime socket hardening is **best-effort**: whenever a brand-new `wsl.exe` session is spawned from the Windows host while the agent is already running, the newly created socket has a brief (~tens of ms) window before systemd applies `0770` (opening panes in `tmux` or integrated terminals inside an already-connected VSCode Server does not spawn new interop sockets).
+  - If WSLg GUI support is enabled, X11/Wayland sockets under `/mnt/wslg` remain shared (`guiApplications=false` in host `.wslconfig` disables WSLg if needed); for a hard air-gap, set `[interop] enabled=false` in `/etc/wsl.conf`.
+  - When `--harden-wsl` is not enabled, `install.sh` still offers to patch a soft notice into the `/nas-elevate` skill (`--wsl-warning`).
 
 ---
 

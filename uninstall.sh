@@ -40,6 +40,7 @@ echo "This will remove:"
 echo "  - Sudoers rule (/etc/sudoers.d/nas-sodo)"
 echo "  - System script (/usr/local/bin/nmux)"
 echo "  - System config (/etc/nas/)"
+echo "  - WSL hardening units (/etc/systemd/system/nas-wsl-interop.*) & /etc/wsl.conf block (if installed)"
 if [ -n "$AGENT_USER" ]; then
   echo "  - Agent config & /nas-elevate skill (as $AGENT_USER)"
 fi
@@ -96,6 +97,49 @@ if [ -d /etc/nas ]; then
   sudo rm -rf /etc/nas
 fi
 
+# 2b. Remove optional WSL hardening (--harden-wsl) if present
+WSL_CONF_RESTORED=0
+if [ -f /etc/systemd/system/nas-wsl-interop.path ] || [ -f /etc/systemd/system/nas-wsl-interop.service ]; then
+  echo "Removing nas-wsl-interop.{path,service}"
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    sudo systemctl disable --now nas-wsl-interop.path nas-wsl-interop.service 2>/dev/null || true
+  fi
+  sudo rm -f /etc/systemd/system/nas-wsl-interop.path /etc/systemd/system/nas-wsl-interop.service
+  if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    sudo systemctl daemon-reload
+    sudo systemctl reset-failed nas-wsl-interop.path nas-wsl-interop.service 2>/dev/null || true
+  fi
+  if [ -d /run/WSL ]; then
+    sudo find /run/WSL -maxdepth 1 -name '*_interop' -type s -exec chown root:root {} + -exec chmod 0777 {} + 2>/dev/null || true
+  fi
+fi
+
+if getent group nas-interop >/dev/null 2>&1; then
+  echo "Removing group nas-interop"
+  sudo groupdel nas-interop 2>/dev/null || true
+fi
+
+if sudo test -f /etc/wsl.conf 2>/dev/null && sudo grep -q '^# BEGIN NAS WSL HARDENING$' /etc/wsl.conf 2>/dev/null; then
+  echo "Removing NAS WSL hardening block from /etc/wsl.conf"
+  WSL_TMP="$(mktemp)"
+  sudo awk '
+    /^# BEGIN NAS WSL HARDENING$/ { skip = 1; next }
+    /^# END NAS WSL HARDENING$/ { skip = 0; next }
+    !skip { lines[++n] = $0 }
+    END {
+      while (n > 0 && lines[n] ~ /^[[:space:]]*$/) n--
+      for (i = 1; i <= n; i++) print lines[i]
+    }
+  ' /etc/wsl.conf > "$WSL_TMP"
+  if grep -q '[^[:space:]]' "$WSL_TMP" 2>/dev/null; then
+    sudo install -o root -g root -m 644 "$WSL_TMP" /etc/wsl.conf
+  else
+    sudo rm -f /etc/wsl.conf
+  fi
+  rm -f "$WSL_TMP"
+  WSL_CONF_RESTORED=1
+fi
+
 # 3. Remove agent-side configs and skill (strictly as AGENT_USER, never as root)
 if [ -n "$AGENT_USER" ] && id "$AGENT_USER" >/dev/null 2>&1; then
   if sudo -u "$AGENT_USER" -H bash -lc 'command -v npx >/dev/null 2>&1'; then
@@ -119,6 +163,9 @@ fi
 
 echo ""
 echo "=== Uninstall Complete ==="
+if [ "$WSL_CONF_RESTORED" -eq 1 ]; then
+  echo "Note: Restart this WSL distro (wsl.exe --terminate <Distro>) if you want default /mnt/* mount permissions restored."
+fi
 if [ -n "$AGENT_USER" ]; then
   echo "Note: Agent user account '$AGENT_USER' was NOT deleted."
   echo "To delete it manually: sudo userdel -r $AGENT_USER"

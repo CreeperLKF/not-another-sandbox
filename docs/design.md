@@ -141,12 +141,25 @@ Human 结束监督:
 
 ---
 
-## 5. WSL 互操作加固说明（可选）
+## 5. WSL 环境加固说明（可选 `--harden-wsl`）
 
-在 WSL 环境中，`/run/WSL/*_interop` socket 默认权限为 `0777`，任何低权限用户均可通过 `binfmt_misc` 调用 Windows 侧 `wsl.exe -u root` 绕过 OS 隔离。
+默认 WSL2 存在两处绕过 Linux 原生多用户隔离的默认暴露面：
+1. **互操作 Socket 权限过宽**：`/run/WSL/*_interop` 由特权 `/init` 创建，属主为 `root:root` 且默认权限为 `0777`。任何低权限 Linux 账户即使未继承 `$WSL_INTEROP`，也可枚举 `/run/WSL/*_interop` 调用宿主机 `wsl.exe -u root` 跨账户提权。
+2. **Windows 盘符全局可读写**：`/mnt/c`、`/mnt/d` 等 `drvfs`（`9p`）挂载默认不设 `umask`（权限 `0777`），低权限账户可直接读写宿主机用户目录（如 `/mnt/c/Users/<user>`）或调用宿主机 `.exe`。
 
-- `install.sh` 会自动检测该风险，并可选择将软提醒直接 patch 进 `/nas-elevate` Skill 中。
-- 彻底封堵需在 WSL 层限制互操作（如禁用 interop 或修补 `/init` 的 socket 权限）。
+NAS 在 `install.sh` 中提供统一的 `--harden-wsl` 可选开关（兼容 `direct` 与 `sodo` 模式，且可由 `uninstall.sh` 完整卸载回滚）：
+
+- **运行时收紧 `/run/WSL/*_interop`（`0770 root:<group>`）**：
+  - 安装 `nas-wsl-interop.path`（监听 `PathChanged=/run/WSL`）与 `nas-wsl-interop.service`（开机 `multi-user.target` 及目录变更时触发，二者均配置 `StartLimitIntervalSec=0` 防止高频打开会话触发 systemd 启动频控熔断）。
+  - 注意不能简单使用 `chmod o=`（因 socket 属主为 `root:root`，仅去 `other` 会将人类自己的普通终端与 VSCode 终端互操作一并锁死），而是将属组设为人类独占主组（或共享主组环境下的专用系统组 `nas-interop`）并设 `0770`。
+  - 效果：人类账户、`root` 及 VSCode Remote-WSL 互操作完全正常，且日常在 WSL 内调用 Windows 程序仅做 `connect()` 而不触发目录变更（零性能损耗、零额外日志）；低权限 `agent` 连接任意互操作 socket 均被内核拒绝（`EACCES`）。
+- **挂载层收紧 `/mnt/*`（`umask=077`）**：
+  - 在 `/etc/wsl.conf` 的 `[automount]` 段写入 `options = "uid=<human_uid>,gid=<human_gid>,umask=077"`（若用户已有自定义 `options` 则保留原配置并给出提示，绝不强行覆盖）。
+  - 重启一次 WSL 实例生效后，所有 Windows 盘变为 `0700`：人类与 `root`（依托 `9p` `access=client` 与 `CAP_DAC_OVERRIDE`）正常访问，`agent` 既无法读写宿主机文件，也无法触及 `/mnt/c/.../wsl.exe` 二进制本身（需将协作代码库放在 Linux 原生文件系统中）。
+- **坦诚边界（Best-Effort 定位）**：
+  - 运行时 socket 收紧属于 **best-effort** 机制：当宿主机从 Windows 侧新拉起 `wsl.exe` 会话时，新 socket 在 systemd 完成 `chmod` 前存在数十毫秒级的创建窗口（日常在已启动的 VSCode 或 `tmux` 内开窗不会产生新 socket）。
+  - 若开启了 WSLg 图形支持，`/mnt/wslg` 下的 X11/Wayland socket 仍对本地图形程序共享（如需关闭可在宿主机 `.wslconfig` 设 `guiApplications=false`）；若需彻底物理切断互操作，可在 `/etc/wsl.conf` 中配置 `[interop] enabled=false`。
+  - 若用户未启用 `--harden-wsl`，`install.sh` 仍支持向 `/nas-elevate` Skill 注入软安全提醒（`--wsl-warning`）。
 
 ---
 
