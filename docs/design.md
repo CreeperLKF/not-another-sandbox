@@ -177,6 +177,8 @@ not-another-sandbox/
 │   ├── nas-setup-guide/SKILL.md     # 安装引导 Skill（README 引用，不安装）
 │   └── nas-elevate/SKILL.md         # 运行时提权 Skill（安装时按模式渲染）
 ├── docs/
+│   ├── cheatsheet.md                # 给人类读的多账户与 tmux 速查手册（中文）
+│   ├── cheatsheet.en.md             # 给人类读的多账户与 tmux 速查手册（英文）
 │   ├── design.md                    # 本文档（中文）
 │   └── design.en.md                 # 设计文档（英文）
 └── tests/

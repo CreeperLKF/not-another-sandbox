@@ -177,6 +177,8 @@ not-another-sandbox/
 │   ├── nas-setup-guide/SKILL.md     # Setup guide skill (referenced by README, not installed)
 │   └── nas-elevate/SKILL.md         # Runtime elevation skill (rendered per mode during install)
 ├── docs/
+│   ├── cheatsheet.md                # Human quick reference: multi-user & tmux (Chinese)
+│   ├── cheatsheet.en.md             # Human quick reference: multi-user & tmux (English)
 │   ├── design.md                    # Architecture & security invariants (Chinese)
 │   └── design.en.md                 # This document (English)
 └── tests/
