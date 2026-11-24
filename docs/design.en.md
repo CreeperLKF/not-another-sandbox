@@ -93,7 +93,7 @@ When multiple agents share the same `agent` UID, `sodo` (*super-oracle do*) uses
 Human (in human account):
   $ nmux create work
     -> Starts isolated tmux server: tmux -L nmux-work new-session -d -s work
-    -> Generates random UUID, writes @nmux_token into server RAM via stdin (`tmux source-file -`, never in argv)
+    -> Generates short random token (XXXX-XXXX, 40-bit unambiguous alphabet), writes @nmux_token into server RAM via stdin (`tmux source-file -`, never in argv)
     -> Prints token; human copies it to target agent and presses Enter to attach and supervise
 
 Agent (in agent account):

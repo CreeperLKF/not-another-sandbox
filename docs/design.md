@@ -93,7 +93,7 @@ Human 结束监督:
 Human (在 human 账户):
   $ nmux create work
     -> 启动独立 tmux server: tmux -L nmux-work new-session -d -s work
-    -> 生成随机 UUID，经 stdin (`tmux source-file -`) 写入该 server 内存选项 @nmux_token（不进入 argv）
+    -> 生成短随机令牌（XXXX-XXXX，40 bit 无歧义字符），经 stdin (`tmux source-file -`) 写入该 server 内存选项 @nmux_token（不进入 argv）
     -> 打印 Token，人类复制给指定 Agent 后按 Enter attach 盯屏
 
 Agent (在 agent 账户):

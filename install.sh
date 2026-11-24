@@ -589,6 +589,8 @@ if sudo -u "$AGENT_USER" -H bash -lc 'command -v npx >/dev/null 2>&1'; then
     echo -e "${YELLOW}⚠ npx skills failed (offline or unavailable); falling back to direct install.${NC}"
   fi
   sudo -u "$AGENT_USER" rm -rf -- "$STAGE_DIR"
+else
+  echo -e "${DIM}Note: npx not found in '$AGENT_USER' PATH; using direct skill install (~/.claude/skills/nas-elevate).${NC}"
 fi
 
 if [ "$SKILL_INSTALLED_VIA_NPX" -eq 0 ]; then
@@ -612,18 +614,35 @@ if [ "$WSL_RESTART_NEEDED" -eq 1 ]; then
   echo "  so /mnt/* umask=077 takes effect. Keep shared agent project directories on the Linux filesystem (not /mnt/c)."
 fi
 echo ""
+echo ""
+echo -e "${BOLD}Next steps:${NC}"
+echo "  1. Start your agent:"
+echo "       sudo -u $AGENT_USER -i"
 if [ "$MODE" = "direct" ]; then
-  echo "Quick test:"
-  echo "  Human (in $AGENT_USER): tmux new -s work  ->  su - $HUMAN_USER"
-  echo "  Agent ($AGENT_USER):    tmux send-keys -t work 'whoami' Enter && tmux capture-pane -t work -p"
-  if [ "$HARDEN_WSL_CHOICE" = "yes" ]; then
-    echo ""
-    echo "To remove WSL hardening units, /etc/wsl.conf block, and configs later: ./uninstall.sh"
-  fi
+  echo "  2. First elevation test (direct mode):"
+  echo "       Human (in $AGENT_USER): tmux new -s work  ->  su - $HUMAN_USER"
+  echo "       Agent ($AGENT_USER):    tmux send-keys -t work 'whoami' Enter && tmux capture-pane -t work -p"
+  echo "  3. Check / close orphan sessions anytime:"
+  echo "       tmux ls   (in $AGENT_USER; exit or tmux kill-session -t <name> to revoke)"
 else
-  echo "Quick test:"
-  echo "  Human ($HUMAN_USER): nmux create work"
-  echo "  Agent ($AGENT_USER): printf '%s\\n' \"\$TOKEN\" | nmux work send-keys -t work 'whoami' Enter"
+  echo "  2. First elevation test (sodo mode):"
+  echo "       Human ($HUMAN_USER): nmux create work"
+  echo "       Agent ($AGENT_USER): printf '%s\\n' \"\$TOKEN\" | nmux work send-keys -t work 'whoami' Enter"
+  echo "  3. Check / close orphan sessions anytime:"
+  echo "       nmux ls   (in $HUMAN_USER; exit or nmux kill <name> to revoke)"
+fi
+if [ "$IS_WSL" -eq 1 ]; then
+  if [ "$HARDEN_WSL_CHOICE" = "yes" ] && [ "$WSL_RESTART_NEEDED" -eq 1 ]; then
+    echo "  4. WSL status: interop sockets hardened (0770); restart WSL once to apply /mnt/* umask=077"
+  elif [ "$HARDEN_WSL_CHOICE" = "yes" ]; then
+    echo "  4. WSL status: hardened (0770 interop sockets + /mnt/* umask=077)"
+  elif [ "$WSL_INTEROP_EXPOSED" -eq 1 ] || [ "$WSL_DRVFS_EXPOSED" -eq 1 ]; then
+    echo "  4. WSL status: unhardened (optional: re-run ./install.sh --harden-wsl)"
+  else
+    echo "  4. WSL status: isolated"
+  fi
+fi
+if [ "$MODE" = "sodo" ] || [ "$HARDEN_WSL_CHOICE" = "yes" ]; then
   echo ""
-  echo "To remove sudoers, /usr/local/bin/nmux, WSL hardening (if enabled), and configs later: ./uninstall.sh"
+  echo "To cleanly remove installed system rules/units and configs later: ./uninstall.sh"
 fi

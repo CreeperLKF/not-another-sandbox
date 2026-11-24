@@ -121,7 +121,7 @@ echo ""
 echo "=== 3. Sodo Mode Cross-UID Token Delegation & Security Boundaries ==="
 CREATE_OUT="$(run_as_human "nmux create -d testwork")"
 TOKEN="$(printf '%s\n' "$CREATE_OUT" | awk '/^Token:/ {print $2}')"
-[ -n "$TOKEN" ] && check "nmux create returns ephemeral session token" 1 || check "nmux create returns ephemeral session token" 0
+[[ "$TOKEN" =~ ^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$ ]] && check "nmux create returns XXXX-XXXX short token ($TOKEN)" 1 || check "nmux create returns XXXX-XXXX short token ($TOKEN)" 0
 ! compgen -G "/dev/shm/nmux-*" >/dev/null && check "Zero token files written to /dev/shm" 1 || check "Zero token files written to /dev/shm" 0
 
 run_as_agent "test -w '/tmp/tmux-${HUMAN_UID}/nmux-testwork'" 2>/dev/null && check "Agent cannot write human tmux socket directly" 0 || check "Agent cannot write human tmux socket directly" 1
@@ -136,7 +136,10 @@ else
 fi
 
 # Security boundary rejections
-run_as_agent "printf 'wrong-token\n' | nmux testwork list-panes" >/dev/null 2>&1 && check "Rejects wrong token" 0 || check "Rejects wrong token" 1
+WRONG_TOKEN="ABCD-EFGH"
+[ "$TOKEN" = "$WRONG_TOKEN" ] && WRONG_TOKEN="WXYZ-2345"
+run_as_agent "printf '%s\n' '$WRONG_TOKEN' | nmux testwork list-panes" >/dev/null 2>&1 && check "Rejects well-formed wrong token" 0 || check "Rejects well-formed wrong token" 1
+run_as_agent "printf 'malformed-token\n' | nmux testwork list-panes" >/dev/null 2>&1 && check "Rejects malformed token format" 0 || check "Rejects malformed token format" 1
 run_as_agent "printf '' | nmux testwork list-panes" >/dev/null 2>&1 && check "Rejects empty stdin" 0 || check "Rejects empty stdin" 1
 
 run_as_human "tmux -L default-priv new-session -d -s priv"
